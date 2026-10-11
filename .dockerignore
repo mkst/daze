@@ -1,0 +1,13 @@
+# Release image build context: only what the Dockerfile COPYs.
+# Anything added to a COPY instruction must be allowlisted here,
+# otherwise the file is invisible inside the build.
+*
+!CMakeLists.txt
+!CMakePresets.json
+!Dockerfile
+!.dockerignore
+!LICENSE.md
+!THIRD_PARTY_NOTICES.md
+!cmake/
+!src/
+!tools/

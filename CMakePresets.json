@@ -1,0 +1,316 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "debug",
+      "displayName": "Debug",
+      "description": "Debug build with assertions and debug symbols",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "Release",
+      "description": "Optimised build for performance and small size",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "kvm-only",
+      "displayName": "Linux x86 KVM-only Debug",
+      "description": "Debug build without Unicorn; requires a Linux/x86 target",
+      "inherits": "debug",
+      "binaryDir": "${sourceDir}/build/kvm-only",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "DAZE_UNICORN_BACKEND": "OFF"
+      }
+    },
+    {
+      "name": "debug-static",
+      "displayName": "Static Debug",
+      "description": "Fully static executable with debug symbols",
+      "inherits": "debug",
+      "binaryDir": "${sourceDir}/build/debug-static",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "DAZE_BUILD_STATIC": "ON"
+      }
+    },
+    {
+      "name": "release-static",
+      "displayName": "Static Release",
+      "description": "Fully static, stripped executable for distribution",
+      "inherits": "release",
+      "binaryDir": "${sourceDir}/build/release-static",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "DAZE_BUILD_STATIC": "ON"
+      }
+    },
+    {
+      "name": "asan",
+      "displayName": "AddressSanitizer Debug",
+      "description": "Debug build with AddressSanitizer heap checking; the prebuilt Unicorn archive stays uninstrumented",
+      "inherits": "debug",
+      "binaryDir": "${sourceDir}/build/asan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_FLAGS": "-fsanitize=address -fno-omit-frame-pointer",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address",
+        "CMAKE_SHARED_LINKER_FLAGS": "-fsanitize=address",
+        "CMAKE_MODULE_LINKER_FLAGS": "-fsanitize=address"
+      }
+    },
+    {
+      "name": "coverage",
+      "displayName": "Coverage Debug",
+      "description": "Debug build with GCC gcov instrumentation",
+      "inherits": "debug",
+      "binaryDir": "${sourceDir}/build/coverage",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_FLAGS": "--coverage -fprofile-abs-path",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_EXE_LINKER_FLAGS": "--coverage",
+        "CMAKE_SHARED_LINKER_FLAGS": "--coverage",
+        "CMAKE_MODULE_LINKER_FLAGS": "--coverage"
+      }
+    },
+    {
+      "name": "kvm-only-static",
+      "displayName": "Static Linux x86 KVM-only Debug",
+      "description": "Fully static Debug executable without Unicorn; requires Linux/x86",
+      "inherits": "kvm-only",
+      "binaryDir": "${sourceDir}/build/kvm-only-static",
+      "cacheVariables": {
+        "DAZE_BUILD_STATIC": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "debug"
+    },
+    {
+      "name": "release",
+      "configurePreset": "release"
+    },
+    {
+      "name": "kvm-only",
+      "configurePreset": "kvm-only"
+    },
+    {
+      "name": "asan",
+      "configurePreset": "asan"
+    },
+    {
+      "name": "coverage",
+      "configurePreset": "coverage"
+    },
+    {
+      "name": "debug-static",
+      "configurePreset": "debug-static"
+    },
+    {
+      "name": "release-static",
+      "configurePreset": "release-static"
+    },
+    {
+      "name": "kvm-only-static",
+      "configurePreset": "kvm-only-static"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "filter": {
+        "exclude": {
+          "label": "integration"
+        }
+      },
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 1,
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "filter": {
+        "exclude": {
+          "label": "integration"
+        }
+      },
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 1,
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "kvm-only",
+      "configurePreset": "kvm-only",
+      "filter": {
+        "exclude": {
+          "label": "integration"
+        }
+      },
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 1,
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "kvm-only-integration",
+      "configurePreset": "kvm-only",
+      "filter": {
+        "include": {
+          "label": "integration"
+        }
+      },
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "integration",
+      "configurePreset": "debug",
+      "filter": {
+        "include": {
+          "label": "integration"
+        }
+      },
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "asan",
+      "configurePreset": "asan",
+      "filter": {
+        "exclude": {
+          "label": "integration"
+        }
+      },
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "asan-integration",
+      "configurePreset": "asan",
+      "filter": {
+        "include": {
+          "label": "integration"
+        }
+      },
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "coverage",
+      "configurePreset": "coverage",
+      "filter": {
+        "exclude": {
+          "label": "integration"
+        }
+      },
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "coverage-integration",
+      "configurePreset": "coverage",
+      "filter": {
+        "include": {
+          "label": "integration"
+        }
+      },
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 1,
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "debug-static",
+      "inherits": "debug",
+      "configurePreset": "debug-static",
+      "execution": {
+        "jobs": 1,
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "debug-static-integration",
+      "inherits": "integration",
+      "configurePreset": "debug-static",
+      "execution": {
+        "jobs": 1,
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "release-static",
+      "inherits": "release",
+      "configurePreset": "release-static",
+      "execution": {
+        "jobs": 1,
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "release-static-integration",
+      "inherits": "integration",
+      "configurePreset": "release-static",
+      "execution": {
+        "jobs": 1,
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "kvm-only-static",
+      "inherits": "kvm-only",
+      "configurePreset": "kvm-only-static",
+      "execution": {
+        "jobs": 1,
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "kvm-only-static-integration",
+      "inherits": "kvm-only-integration",
+      "configurePreset": "kvm-only-static",
+      "execution": {
+        "jobs": 1,
+        "noTestsAction": "error"
+      }
+    }
+  ]
+}

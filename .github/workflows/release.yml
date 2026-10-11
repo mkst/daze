@@ -1,0 +1,256 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "[0-9]*"
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  validate:
+    name: Validate tagged commit
+    if: github.ref_type == 'tag'
+    uses: ./.github/workflows/build.yml
+    permissions:
+      contents: read
+
+  static-linux:
+    name: Native release (linux-x86_64, static)
+    needs: validate
+    if: >-
+      !cancelled() &&
+      (needs.validate.result == 'success' ||
+      (github.ref_type != 'tag' && needs.validate.result == 'skipped'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      DAZE_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build static binary
+        run: |
+          docker buildx build \
+            --platform linux/amd64 \
+            --build-arg "DAZE_VERSION=${DAZE_VERSION}" \
+            --target export \
+            --output type=local,dest=dist \
+            .
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-linux-x86_64
+          path: dist/
+          if-no-files-found: error
+
+  native-releases:
+    name: Native release (${{ matrix.name }})
+    needs: validate
+    if: >-
+      !cancelled() &&
+      (needs.validate.result == 'success' ||
+      (github.ref_type != 'tag' && needs.validate.result == 'skipped'))
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-arm64
+            runner: ubuntu-24.04-arm
+            kind: linux
+          - name: macos-arm64
+            runner: macos-15
+            kind: macos
+    env:
+      DAZE_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify native ARM64 runner
+        run: |
+          test "$(uname -m)" = aarch64 || test "$(uname -m)" = arm64
+          uname -a
+      - name: Build static Linux ARM64 release
+        if: matrix.kind == 'linux'
+        run: |
+          docker buildx build \
+            --platform linux/arm64 \
+            --build-arg "DAZE_VERSION=${DAZE_VERSION}" \
+            --target export \
+            --output type=local,dest=dist \
+            .
+          tar -czf dist/daze-linux-arm64.tar.gz -C dist \
+            daze LICENSE.md THIRD_PARTY_NOTICES.md BUILD-INFO.txt licenses
+      - name: Install macOS build tools
+        if: matrix.kind == 'macos'
+        run: brew install ninja
+      - name: Build static Unicorn for macOS ARM64
+        if: matrix.kind == 'macos'
+        run: |
+          git clone --depth 1 --branch 2.1.4 \
+            https://github.com/unicorn-engine/unicorn.git "$RUNNER_TEMP/unicorn"
+          cmake -S "$RUNNER_TEMP/unicorn" -B "$RUNNER_TEMP/unicorn-build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DUNICORN_ARCH=x86 \
+            -DUNICORN_LEGACY_STATIC_ARCHIVE=ON \
+            -DUNICORN_BUILD_TESTS=OFF \
+            -DBUILD_SHARED_LIBS=OFF
+          cmake --build "$RUNNER_TEMP/unicorn-build" --parallel 2
+      - name: Build standalone macOS ARM64 release
+        if: matrix.kind == 'macos'
+        run: |
+          cmake -S . -B build/release-macos -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
+            -DDAZE_BUILD_STATIC=OFF \
+            -DDAZE_UNICORN_BACKEND=ON \
+            -DDAZE_VERSION="${DAZE_VERSION}" \
+            -DUNICORN_INCLUDE_DIR="$RUNNER_TEMP/unicorn/include" \
+            -DUNICORN_LIBRARY="$RUNNER_TEMP/unicorn-build/libunicorn.a" \
+            -DBUILD_TESTING=OFF
+          cmake --build build/release-macos --parallel 2
+          build/release-macos/daze --version
+          package=build/macos-package
+          mkdir -p "$package/licenses" dist
+          cp build/release-macos/daze "$package/daze"
+          cp LICENSE.md THIRD_PARTY_NOTICES.md "$package/"
+          cp "$RUNNER_TEMP/unicorn/COPYING" "$package/licenses/GPL-2.0.txt"
+          cp "$RUNNER_TEMP/unicorn/COPYING_GLIB" "$package/licenses/unicorn-glib.txt"
+          cp "$RUNNER_TEMP/unicorn/COPYING.LGPL2" "$package/licenses/unicorn-LGPL-2.0.txt"
+          cp "$RUNNER_TEMP/unicorn/qemu/LICENSE" "$package/licenses/unicorn-qemu.txt"
+          {
+            printf 'Daze version: %s\n' "$DAZE_VERSION"
+            printf 'Unicorn revision: %s\n' "$(git -C "$RUNNER_TEMP/unicorn" rev-parse HEAD)"
+            clang --version
+            cmake --version
+            sw_vers
+          } > "$package/BUILD-INFO.txt"
+          tar -czf dist/daze-macos-arm64.tar.gz -C "$package" .
+      - name: Upload native release artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ matrix.name }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub release assets
+    needs: [static-linux, native-releases, docker-manifest]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download x86_64 Linux release
+        uses: actions/download-artifact@v7
+        with:
+          name: release-linux-x86_64
+          path: dist/linux-x86_64
+      - name: Download Linux ARM64 release
+        uses: actions/download-artifact@v7
+        with:
+          name: release-linux-arm64
+          path: dist/archives
+      - name: Download macOS ARM64 release
+        uses: actions/download-artifact@v7
+        with:
+          name: release-macos-arm64
+          path: dist/archives
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            dist/linux-x86_64/daze
+            dist/linux-x86_64/LICENSE.md
+            dist/linux-x86_64/THIRD_PARTY_NOTICES.md
+            dist/linux-x86_64/BUILD-INFO.txt
+            dist/linux-x86_64/licenses/*
+            dist/archives/*.tar.gz
+          fail_on_unmatched_files: true
+
+  docker-image:
+    name: Docker image (${{ matrix.arch }})
+    needs: validate
+    if: >-
+      !cancelled() &&
+      (needs.validate.result == 'success' ||
+      (github.ref_type != 'tag' && needs.validate.result == 'skipped'))
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+            platform: linux/amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+            platform: linux/arm64
+    env:
+      DAZE_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+      - name: Log in to GitHub Container Registry
+        if: github.ref_type == 'tag'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set image name
+        id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      - name: Build and publish architecture image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          target: daze
+          push: ${{ github.ref_type == 'tag' }}
+          build-args: |
+            DAZE_VERSION=${{ env.DAZE_VERSION }}
+          tags: ${{ steps.image.outputs.name }}:${{ env.DAZE_VERSION }}-${{ matrix.arch }}
+
+  docker-manifest:
+    name: Publish multi-platform Docker tags
+    needs: docker-image
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      packages: write
+    env:
+      DAZE_VERSION: ${{ github.ref_name }}
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish version and latest manifests
+        run: |
+          image_name="ghcr.io/${GITHUB_REPOSITORY,,}"
+          docker buildx imagetools create \
+            --tag "${image_name}:${DAZE_VERSION}" \
+            "${image_name}:${DAZE_VERSION}-amd64" \
+            "${image_name}:${DAZE_VERSION}-arm64"
+          docker buildx imagetools create \
+            --tag "${image_name}:latest" \
+            "${image_name}:${DAZE_VERSION}-amd64" \
+            "${image_name}:${DAZE_VERSION}-arm64"

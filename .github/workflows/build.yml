@@ -1,0 +1,311 @@
+name: Build
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  arm:
+    name: Unicorn ARM64 (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04-arm, macos-15]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install build tools
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            brew install ninja
+          else
+            sudo apt-get update
+            sudo apt-get install -y ninja-build python3-venv
+          fi
+          test "$(uname -m)" = aarch64 || test "$(uname -m)" = arm64
+          uname -a
+      - name: Prepare case-sensitive macOS test filesystem
+        id: macos-test-filesystem
+        if: runner.os == 'macOS'
+        run: |
+          hdiutil create -size 512m -fs HFSX -volname daze-tests "$RUNNER_TEMP/daze-tests.dmg"
+          hdiutil attach "$RUNNER_TEMP/daze-tests.dmg" -mountpoint /Volumes/daze-tests
+          python3 - <<'PY'
+          from pathlib import Path
+          probe = Path('/Volumes/daze-tests')
+          upper, lower = probe / 'CaseProbe', probe / 'caseprobe'
+          upper.write_text('upper')
+          with lower.open('x') as output:
+              output.write('lower')
+          assert upper.read_text() == 'upper' and lower.read_text() == 'lower'
+          upper.unlink()
+          lower.unlink()
+          PY
+          echo 'TMPDIR=/Volumes/daze-tests' >> "$GITHUB_ENV"
+      - name: Prepare pinned external corpus
+        run: python3 tools/external_tests.py prepare
+      - name: Build Unicorn 2.1.4
+        run: |
+          git clone --depth 1 --branch 2.1.4 \
+            https://github.com/unicorn-engine/unicorn.git "$RUNNER_TEMP/unicorn"
+          cmake -S "$RUNNER_TEMP/unicorn" -B "$RUNNER_TEMP/unicorn-build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DUNICORN_ARCH=x86 \
+            -DUNICORN_LEGACY_STATIC_ARCHIVE=ON \
+            -DUNICORN_BUILD_TESTS=OFF \
+            -DBUILD_SHARED_LIBS=OFF
+          cmake --build "$RUNNER_TEMP/unicorn-build" --parallel 2
+      - name: Configure Unicorn build
+        run: >-
+          cmake --preset debug
+          -DDAZE_UNICORN_BACKEND=ON
+          -DUNICORN_INCLUDE_DIR="$RUNNER_TEMP/unicorn/include"
+          -DUNICORN_LIBRARY="$RUNNER_TEMP/unicorn-build/libunicorn.a"
+          -DDAZE_EXTERNAL_TESTS=ON
+          -DDAZE_TESTS_DIR="$GITHUB_WORKSPACE/build/daze-tests"
+          -DPython3_EXECUTABLE="$GITHUB_WORKSPACE/build/daze-tests-venv/bin/python"
+          -DDAZE_EXTERNAL_BACKENDS=unicorn
+      - name: Build Unicorn targets
+        run: cmake --build --preset debug --parallel 2
+      - name: Validate portable local tests
+        run: python3 tools/external_tests.py run --build build/debug --suite local --portable
+      - name: Validate Unicorn external regressions
+        run: python3 tools/external_tests.py run --build build/debug
+      - name: Publish ARM64 evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: arm64-${{ matrix.runner }}-evidence
+          path: |
+            build/debug/local-evidence/
+            build/debug/external-evidence/
+            build/debug/Testing/Temporary/
+      - name: Detach macOS test filesystem
+        if: always() && runner.os == 'macOS' && steps.macos-test-filesystem.outcome == 'success'
+        run: hdiutil detach /Volumes/daze-tests
+
+  kvm-only:
+    name: KVM-only Linux/x86
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Require usable KVM
+        run: |
+          test -e /dev/kvm
+          sudo usermod -aG kvm "$(id -un)"
+          sudo chgrp kvm /dev/kvm
+          sudo chmod g+rw /dev/kvm
+          sg kvm -c 'python3 tools/external_tests.py probe-kvm'
+          uname -r
+          lscpu
+      - name: Prepare pinned external corpus
+        run: python3 tools/external_tests.py prepare
+      - name: Configure KVM-only build
+        run: >-
+          cmake --preset kvm-only
+          -DDAZE_EXTERNAL_TESTS=ON
+          -DDAZE_TESTS_DIR="$GITHUB_WORKSPACE/build/daze-tests"
+          -DPython3_EXECUTABLE="$GITHUB_WORKSPACE/build/daze-tests-venv/bin/python"
+      - name: Build KVM-only targets
+        run: cmake --build --preset kvm-only --parallel 2
+      - name: Validate KVM-only local and external suites
+        run: |
+          sg kvm -c 'python3 tools/external_tests.py run --build build/kvm-only --suite local'
+          sg kvm -c 'python3 tools/external_tests.py run --build build/kvm-only'
+      - name: Publish KVM-only evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: kvm-only-evidence
+          path: |
+            build/kvm-only/external-evidence/
+            build/kvm-only/local-evidence/
+            build/kvm-only/Testing/Temporary/
+      - name: KVM-only local tests
+        if: always() && hashFiles('build/kvm-only/local-evidence/latest/tests.xml') != ''
+        uses: EnricoMi/publish-unit-test-result-action@d0a4676d0e0b938bc201470d88276b7c74c712b3 # v2.24.0
+        with:
+          files: build/kvm-only/local-evidence/latest/tests.xml
+          check_name: KVM-only local tests
+          check_run: false
+          comment_mode: "off"
+          compare_to_earlier_commit: false
+          job_summary: true
+      - name: KVM-only external tests
+        if: always() && hashFiles('build/kvm-only/external-evidence/latest/tests.xml') != ''
+        uses: EnricoMi/publish-unit-test-result-action@d0a4676d0e0b938bc201470d88276b7c74c712b3 # v2.24.0
+        with:
+          files: build/kvm-only/external-evidence/latest/tests.xml
+          check_name: KVM-only external tests
+          check_run: false
+          comment_mode: "off"
+          compare_to_earlier_commit: false
+          job_summary: true
+
+  unicorn:
+    name: Unicorn and KVM (${{ matrix.profile }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [portable, kvm]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Require usable KVM
+        if: matrix.profile == 'kvm'
+        run: |
+          test -e /dev/kvm
+          sudo usermod -aG kvm "$(id -un)"
+          sudo chgrp kvm /dev/kvm
+          sudo chmod g+rw /dev/kvm
+          sg kvm -c 'python3 tools/external_tests.py probe-kvm'
+          uname -r
+          lscpu
+      - name: Prepare pinned external corpus
+        run: python3 tools/external_tests.py prepare
+      - name: Build Unicorn 2.1.4
+        run: |
+          git clone --depth 1 --branch 2.1.4 \
+            https://github.com/unicorn-engine/unicorn.git "$RUNNER_TEMP/unicorn"
+          cmake -S "$RUNNER_TEMP/unicorn" -B "$RUNNER_TEMP/unicorn-build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DUNICORN_ARCH=x86 \
+            -DUNICORN_LEGACY_STATIC_ARCHIVE=ON \
+            -DUNICORN_BUILD_TESTS=OFF \
+            -DBUILD_SHARED_LIBS=OFF
+          cmake --build "$RUNNER_TEMP/unicorn-build" --parallel 2
+      - name: Configure Unicorn coverage build
+        run: >-
+          cmake --preset coverage
+          -DDAZE_UNICORN_BACKEND=ON
+          -DUNICORN_INCLUDE_DIR="$RUNNER_TEMP/unicorn/include"
+          -DUNICORN_LIBRARY="$RUNNER_TEMP/unicorn-build/libunicorn.a"
+          -DDAZE_EXTERNAL_TESTS=ON
+          -DDAZE_TESTS_DIR="$GITHUB_WORKSPACE/build/daze-tests"
+          -DPython3_EXECUTABLE="$GITHUB_WORKSPACE/build/daze-tests-venv/bin/python"
+          -DDAZE_EXTERNAL_BACKENDS="${{ matrix.profile == 'portable' && 'unicorn' || 'unicorn;kvm;auto;omitted' }}"
+      - name: Build Unicorn targets
+        run: cmake --build --preset coverage --parallel 2
+      - name: Install coverage tools
+        run: |
+          python3 -m venv build/coverage-tools
+          build/coverage-tools/bin/python -m pip install -r tools/coverage-requirements.txt
+          echo "$GITHUB_WORKSPACE/build/coverage-tools/bin" >> "$GITHUB_PATH"
+      - name: Prepare contract coverage
+        run: |
+          if [ "${{ matrix.profile }}" = kvm ]; then
+            sg kvm -c 'build/coverage-tools/bin/python tools/coverage.py --profile kvm --suite contracts --stage prepare'
+          else
+            build/coverage-tools/bin/python tools/coverage.py --profile portable --suite contracts --stage prepare
+          fi
+      - name: Generate contract coverage reports
+        uses: threeal/gcovr-action@64cb417ed6f143cafe1c69611922672002f460bb # v1.2.0
+        with:
+          working-directory: build/coverage/reports/${{ matrix.profile }}/contracts
+      - name: Gate contract coverage
+        run: build/coverage-tools/bin/python tools/coverage.py --profile ${{ matrix.profile }} --suite contracts --stage report
+      - name: Prepare local coverage
+        run: |
+          if [ "${{ matrix.profile }}" = kvm ]; then
+            sg kvm -c 'build/coverage-tools/bin/python tools/coverage.py --profile kvm --suite local --stage prepare'
+          else
+            build/coverage-tools/bin/python tools/coverage.py --profile portable --suite local --stage prepare
+          fi
+      - name: Generate local coverage reports
+        uses: threeal/gcovr-action@64cb417ed6f143cafe1c69611922672002f460bb # v1.2.0
+        with:
+          working-directory: build/coverage/reports/${{ matrix.profile }}/local
+      - name: Gate local coverage
+        run: build/coverage-tools/bin/python tools/coverage.py --profile ${{ matrix.profile }} --suite local --stage report
+      - name: Validate required external regressions
+        run: |
+          if [ "${{ matrix.profile }}" = kvm ]; then
+            sg kvm -c 'python3 tools/external_tests.py run --build build/coverage'
+          else
+            python3 tools/external_tests.py run --build build/coverage
+          fi
+      - name: Publish coverage reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.profile }}-coverage
+          path: build/coverage/reports/${{ matrix.profile }}/
+          if-no-files-found: error
+      - name: Publish regression evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.profile }}-regression-evidence
+          path: |
+            build/coverage/external-evidence/
+            build/coverage/Testing/Temporary/
+      - name: Contract tests (${{ matrix.profile }})
+        if: always() && hashFiles(format('build/coverage/reports/{0}/contracts/tests.xml', matrix.profile)) != ''
+        uses: EnricoMi/publish-unit-test-result-action@d0a4676d0e0b938bc201470d88276b7c74c712b3 # v2.24.0
+        with:
+          files: build/coverage/reports/${{ matrix.profile }}/contracts/tests.xml
+          check_name: Contract tests (${{ matrix.profile }})
+          check_run: false
+          comment_mode: "off"
+          compare_to_earlier_commit: false
+          job_summary: true
+      - name: All local tests (${{ matrix.profile }})
+        if: always() && hashFiles(format('build/coverage/reports/{0}/local/tests.xml', matrix.profile)) != ''
+        uses: EnricoMi/publish-unit-test-result-action@d0a4676d0e0b938bc201470d88276b7c74c712b3 # v2.24.0
+        with:
+          files: build/coverage/reports/${{ matrix.profile }}/local/tests.xml
+          check_name: All local tests (${{ matrix.profile }})
+          check_run: false
+          comment_mode: "off"
+          compare_to_earlier_commit: false
+          job_summary: true
+      - name: External tests (${{ matrix.profile }})
+        if: always() && hashFiles('build/coverage/external-evidence/latest/tests.xml') != ''
+        uses: EnricoMi/publish-unit-test-result-action@d0a4676d0e0b938bc201470d88276b7c74c712b3 # v2.24.0
+        with:
+          files: build/coverage/external-evidence/latest/tests.xml
+          check_name: External tests (${{ matrix.profile }})
+          check_run: false
+          comment_mode: "off"
+          compare_to_earlier_commit: false
+          job_summary: true
+      - name: Summarize Contract coverage
+        id: contract-coverage-summary
+        if: always() && hashFiles(format('build/coverage/reports/{0}/contracts/coverage.xml', matrix.profile)) != ''
+        uses: irongut/CodeCoverageSummary@51cc3a756ddcd398d447c044c02cb6aa83fdae95 # v1.3.0
+        with:
+          filename: build/coverage/reports/${{ matrix.profile }}/contracts/coverage.xml
+          format: markdown
+          output: file
+          hide_complexity: true
+          indicators: false
+      - name: Append Contract coverage summary
+        if: always() && steps.contract-coverage-summary.outcome == 'success'
+        run: |
+          printf '\n## Contract coverage (${{ matrix.profile }})\n\n' >> "$GITHUB_STEP_SUMMARY"
+          cat code-coverage-results.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Summarize All local coverage
+        id: local-coverage-summary
+        if: always() && hashFiles(format('build/coverage/reports/{0}/local/coverage.xml', matrix.profile)) != ''
+        uses: irongut/CodeCoverageSummary@51cc3a756ddcd398d447c044c02cb6aa83fdae95 # v1.3.0
+        with:
+          filename: build/coverage/reports/${{ matrix.profile }}/local/coverage.xml
+          format: markdown
+          output: file
+          hide_complexity: true
+          indicators: false
+      - name: Append All local coverage summary
+        if: always() && steps.local-coverage-summary.outcome == 'success'
+        run: |
+          printf '\n## All local coverage (${{ matrix.profile }})\n\n' >> "$GITHUB_STEP_SUMMARY"
+          cat code-coverage-results.md >> "$GITHUB_STEP_SUMMARY"

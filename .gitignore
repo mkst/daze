@@ -1,0 +1,6 @@
+/.venv/
+/build/
+/dist
+/spike/
+/TMP/
+/unicorn/
