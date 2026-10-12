@@ -12,14 +12,128 @@ permissions:
   contents: read
 
 jobs:
-  arm:
-    name: Unicorn ARM64 (${{ matrix.runner }})
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 20
+  linux-amd64:
+    name: Linux amd64 (${{ matrix.compiler }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-24.04-arm, macos-15]
+        include:
+          - compiler: GCC
+            cc: gcc
+          - compiler: Clang
+            cc: clang
+    env:
+      CC: ${{ matrix.cc }}
+      BUILD_PRESETS: debug debug-static release release-static asan
+      EXTERNAL_PRESETS: release release-static
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang ninja-build python3-venv
+          "$CC" --version
+          uname -a
+      - name: Require usable KVM
+        run: |
+          test -e /dev/kvm
+          sudo usermod -aG kvm "$(id -un)"
+          sudo chgrp kvm /dev/kvm
+          sudo chmod g+rw /dev/kvm
+          sg kvm -c 'python3 tools/external_tests.py probe-kvm'
+          uname -r
+          lscpu
+      - name: Prepare pinned external corpus
+        run: python3 tools/external_tests.py prepare
+      - name: Build Unicorn 2.1.4 with ${{ matrix.compiler }}
+        run: |
+          git clone --depth 1 --branch 2.1.4 \
+            https://github.com/unicorn-engine/unicorn.git "$RUNNER_TEMP/unicorn"
+          for variant in normal ipo; do
+            cmake_args=()
+            if [ "$variant" = ipo ]; then
+              cmake_args+=(-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON)
+            fi
+            cmake -S "$RUNNER_TEMP/unicorn" -B "$RUNNER_TEMP/unicorn-$variant-build" -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_C_COMPILER="$CC" \
+              "${cmake_args[@]}" \
+              -DUNICORN_ARCH=x86 \
+              -DUNICORN_LEGACY_STATIC_ARCHIVE=ON \
+              -DUNICORN_BUILD_TESTS=OFF \
+              -DBUILD_SHARED_LIBS=OFF
+            cmake --build "$RUNNER_TEMP/unicorn-$variant-build" --parallel 2
+          done
+      - name: Configure Linux amd64 presets
+        run: |
+          for preset in $BUILD_PRESETS; do
+            cmake_args=()
+            unicorn_library="$RUNNER_TEMP/unicorn-normal-build/libunicorn.a"
+            if [ "$preset" = release ] || [ "$preset" = release-static ]; then
+              cmake_args+=(-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON)
+              unicorn_library="$RUNNER_TEMP/unicorn-ipo-build/libunicorn.a"
+            fi
+            cmake --preset "$preset" \
+              "${cmake_args[@]}" \
+              -DCMAKE_C_COMPILER="$CC" \
+              -DDAZE_UNICORN_BACKEND=ON \
+              -DUNICORN_INCLUDE_DIR="$RUNNER_TEMP/unicorn/include" \
+              -DUNICORN_LIBRARY="$unicorn_library" \
+              -DDAZE_EXTERNAL_TESTS=ON \
+              -DDAZE_TESTS_DIR="$GITHUB_WORKSPACE/build/daze-tests" \
+              -DPython3_EXECUTABLE="$GITHUB_WORKSPACE/build/daze-tests-venv/bin/python" \
+              -DDAZE_EXTERNAL_BACKENDS='unicorn;kvm;auto;omitted'
+          done
+      - name: Build Linux amd64 presets
+        run: |
+          for preset in $BUILD_PRESETS; do
+            cmake --build --preset "$preset" --parallel 2
+          done
+      - name: Validate local suites on each Linux amd64 build
+        run: |
+          for preset in $BUILD_PRESETS; do
+            sg kvm -c "python3 tools/external_tests.py run --build build/$preset --suite local"
+          done
+      - name: Validate Release integration suites
+        run: |
+          for preset in $EXTERNAL_PRESETS; do
+            sg kvm -c "python3 tools/external_tests.py run --build build/$preset"
+          done
+      - name: Validate ASan integration suite
+        run: sg kvm -c 'python3 tools/external_tests.py run --build build/asan'
+      - name: Publish Linux amd64 test evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-amd64-${{ matrix.cc }}-evidence
+          path: |
+            build/*/local-evidence/**
+            build/*/external-evidence/**
+            build/*/Testing/Temporary/**
+
+  arm64:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux arm64 (GCC)
+            target: linux-arm64
+            runner: ubuntu-24.04-arm
+            build_presets: debug debug-static release release-static
+            external_presets: release release-static
+          - name: macOS arm64 (Apple Clang)
+            target: macos-arm64
+            runner: macos-15
+            build_presets: debug release
+            external_presets: release
+    env:
+      BUILD_PRESETS: ${{ matrix.build_presets }}
+      EXTERNAL_PRESETS: ${{ matrix.external_presets }}
     steps:
       - uses: actions/checkout@v7
       - name: Install build tools
@@ -28,7 +142,7 @@ jobs:
             brew install ninja
           else
             sudo apt-get update
-            sudo apt-get install -y ninja-build python3-venv
+            sudo apt-get install -y build-essential ninja-build python3-venv
           fi
           test "$(uname -m)" = aarch64 || test "$(uname -m)" = arm64
           uname -a
@@ -52,42 +166,71 @@ jobs:
           echo 'TMPDIR=/Volumes/daze-tests' >> "$GITHUB_ENV"
       - name: Prepare pinned external corpus
         run: python3 tools/external_tests.py prepare
-      - name: Build Unicorn 2.1.4
+      - name: Build Unicorn 2.1.4 with native compiler
         run: |
           git clone --depth 1 --branch 2.1.4 \
             https://github.com/unicorn-engine/unicorn.git "$RUNNER_TEMP/unicorn"
-          cmake -S "$RUNNER_TEMP/unicorn" -B "$RUNNER_TEMP/unicorn-build" -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DUNICORN_ARCH=x86 \
-            -DUNICORN_LEGACY_STATIC_ARCHIVE=ON \
-            -DUNICORN_BUILD_TESTS=OFF \
-            -DBUILD_SHARED_LIBS=OFF
-          cmake --build "$RUNNER_TEMP/unicorn-build" --parallel 2
-      - name: Configure Unicorn build
-        run: >-
-          cmake --preset debug
-          -DDAZE_UNICORN_BACKEND=ON
-          -DUNICORN_INCLUDE_DIR="$RUNNER_TEMP/unicorn/include"
-          -DUNICORN_LIBRARY="$RUNNER_TEMP/unicorn-build/libunicorn.a"
-          -DDAZE_EXTERNAL_TESTS=ON
-          -DDAZE_TESTS_DIR="$GITHUB_WORKSPACE/build/daze-tests"
-          -DPython3_EXECUTABLE="$GITHUB_WORKSPACE/build/daze-tests-venv/bin/python"
-          -DDAZE_EXTERNAL_BACKENDS=unicorn
-      - name: Build Unicorn targets
-        run: cmake --build --preset debug --parallel 2
-      - name: Validate portable local tests
-        run: python3 tools/external_tests.py run --build build/debug --suite local --portable
-      - name: Validate Unicorn external regressions
-        run: python3 tools/external_tests.py run --build build/debug
-      - name: Publish ARM64 evidence
+          unicorn_cmake_args=()
+          if [ "$RUNNER_OS" = macOS ]; then
+            unicorn_cmake_args+=(-DCMAKE_OSX_ARCHITECTURES=arm64)
+          fi
+          for variant in normal ipo; do
+            cmake_args=("${unicorn_cmake_args[@]}")
+            if [ "$variant" = ipo ]; then
+              cmake_args+=(-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON)
+            fi
+            cmake -S "$RUNNER_TEMP/unicorn" -B "$RUNNER_TEMP/unicorn-$variant-build" -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              "${cmake_args[@]}" \
+              -DUNICORN_ARCH=x86 \
+              -DUNICORN_LEGACY_STATIC_ARCHIVE=ON \
+              -DUNICORN_BUILD_TESTS=OFF \
+              -DBUILD_SHARED_LIBS=OFF
+            cmake --build "$RUNNER_TEMP/unicorn-$variant-build" --parallel 2
+          done
+      - name: Configure native ARM64 presets
+        run: |
+          for preset in $BUILD_PRESETS; do
+            cmake_args=()
+            unicorn_library="$RUNNER_TEMP/unicorn-normal-build/libunicorn.a"
+            if [ "$preset" = release ] || [ "$preset" = release-static ]; then
+              cmake_args+=(-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON)
+              unicorn_library="$RUNNER_TEMP/unicorn-ipo-build/libunicorn.a"
+            fi
+            cmake --preset "$preset" \
+              "${cmake_args[@]}" \
+              -DDAZE_UNICORN_BACKEND=ON \
+              -DUNICORN_INCLUDE_DIR="$RUNNER_TEMP/unicorn/include" \
+              -DUNICORN_LIBRARY="$unicorn_library" \
+              -DDAZE_EXTERNAL_TESTS=ON \
+              -DDAZE_TESTS_DIR="$GITHUB_WORKSPACE/build/daze-tests" \
+              -DPython3_EXECUTABLE="$GITHUB_WORKSPACE/build/daze-tests-venv/bin/python" \
+              -DDAZE_EXTERNAL_BACKENDS=unicorn
+          done
+      - name: Build native ARM64 presets
+        run: |
+          for preset in $BUILD_PRESETS; do
+            cmake --build --preset "$preset" --parallel 2
+          done
+      - name: Validate local suites on native ARM64 builds
+        run: |
+          for preset in $BUILD_PRESETS; do
+            python3 tools/external_tests.py run --build "build/$preset" --suite local --portable
+          done
+      - name: Validate Release integration suites
+        run: |
+          for preset in $EXTERNAL_PRESETS; do
+            python3 tools/external_tests.py run --build "build/$preset"
+          done
+      - name: Publish native ARM64 test evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: arm64-${{ matrix.runner }}-evidence
+          name: ${{ matrix.target }}-evidence
           path: |
-            build/debug/local-evidence/
-            build/debug/external-evidence/
-            build/debug/Testing/Temporary/
+            build/*/local-evidence/**
+            build/*/external-evidence/**
+            build/*/Testing/Temporary/**
       - name: Detach macOS test filesystem
         if: always() && runner.os == 'macOS' && steps.macos-test-filesystem.outcome == 'success'
         run: hdiutil detach /Volumes/daze-tests
