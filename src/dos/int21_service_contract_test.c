@@ -742,6 +742,55 @@ int main(void) {
     pass = 0;
   }
 
+  request = (DazeDosInt21Request){.ax = 0x4301, .cx = 0, .ds = 0x0600, .dx = 0x0060};
+  pass &= expect_result(
+    "set normal file attributes", daze_dos_int21_dispatch(&context, &request, &result),
+    DAZE_DOS_INT21_DISPATCH_OK, &result, DAZE_DOS_INT21_HANDLED, 0, DAZE_DOS_INT21_FLAG_CF, 0);
+  request.cx = 1;
+  pass &= expect_result("unsupported set file attribute bits",
+                        daze_dos_int21_dispatch(&context, &request, &result),
+                        DAZE_DOS_INT21_DISPATCH_OK, &result, DAZE_DOS_INT21_HANDLED,
+                        DAZE_DOS_INT21_REG_AX, DAZE_DOS_INT21_FLAG_CF, DAZE_DOS_INT21_FLAG_CF);
+  if (result.ax != 5) {
+    fprintf(stderr, "unsupported file attributes DOS error=%u\n", result.ax);
+    pass = 0;
+  }
+  request.cx = 0;
+  mounts.readonly[drive] = 1;
+  pass &= expect_result("set attributes on read-only mount",
+                        daze_dos_int21_dispatch(&context, &request, &result),
+                        DAZE_DOS_INT21_DISPATCH_OK, &result, DAZE_DOS_INT21_HANDLED,
+                        DAZE_DOS_INT21_REG_AX, DAZE_DOS_INT21_FLAG_CF, DAZE_DOS_INT21_FLAG_CF);
+  if (result.ax != 5) {
+    fprintf(stderr, "read-only attribute mount DOS error=%u\n", result.ax);
+    pass = 0;
+  }
+  mounts.readonly[drive] = 0;
+  memcpy(memory.bytes + 0x60, "C:\\FILE.TXT", 12);
+  request = (DazeDosInt21Request){.ax = 0x4301, .cx = 0, .ds = 0x0600, .dx = 0x0060};
+  pass &= expect_result(
+    "set attributes with explicit drive", daze_dos_int21_dispatch(&context, &request, &result),
+    DAZE_DOS_INT21_DISPATCH_OK, &result, DAZE_DOS_INT21_HANDLED, 0, DAZE_DOS_INT21_FLAG_CF, 0);
+  memcpy(memory.bytes + 0x60, "?:FILE.TXT", 11);
+  request = (DazeDosInt21Request){.ax = 0x4301, .cx = 0, .ds = 0x0600, .dx = 0x0060};
+  pass &= expect_result("set attributes on invalid drive",
+                        daze_dos_int21_dispatch(&context, &request, &result),
+                        DAZE_DOS_INT21_DISPATCH_OK, &result, DAZE_DOS_INT21_HANDLED,
+                        DAZE_DOS_INT21_REG_AX, DAZE_DOS_INT21_FLAG_CF, DAZE_DOS_INT21_FLAG_CF);
+  if (result.ax != 15) {
+    fprintf(stderr, "invalid-drive attribute DOS error=%u\n", result.ax);
+    pass = 0;
+  }
+  memcpy(memory.bytes + 0x60, "[:FILE.TXT", 11);
+  pass &= expect_result("set attributes on out-of-range drive",
+                        daze_dos_int21_dispatch(&context, &request, &result),
+                        DAZE_DOS_INT21_DISPATCH_OK, &result, DAZE_DOS_INT21_HANDLED,
+                        DAZE_DOS_INT21_REG_AX, DAZE_DOS_INT21_FLAG_CF, DAZE_DOS_INT21_FLAG_CF);
+  if (result.ax != 15) {
+    fprintf(stderr, "out-of-range attribute drive DOS error=%u\n", result.ax);
+    pass = 0;
+  }
+
   memcpy(memory.bytes + 0x60, "DELETE.TXT", 11);
   request = (DazeDosInt21Request){.ax = 0x4100, .ds = 0x0600, .dx = 0x0060};
   pass &= expect_result("delete file", daze_dos_int21_dispatch(&context, &request, &result),

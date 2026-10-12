@@ -2,6 +2,7 @@
 
 #include "../bios_adapter.h"
 #include "int21_adapter.h"
+#include "int21_diagnostic.h"
 #include "kvm_bytes.h"
 #include "machine_access.h"
 #include "port.h"
@@ -210,12 +211,15 @@ DazeKvmPreflightBoundaryDisposition daze_kvm_preflight_boundary_broker(
   if (disposition == DAZE_KVM_PREFLIGHT_BOUNDARY_UNSUPPORTED && vector == DAZE_INT_DOS) {
     /* The gate's live CS:IP points into the transport stub; report the saved
      * guest return address and registers instead. */
-    fprintf(stderr,
-            "unsupported DOS 21h function %02xh (AX=%04x BX=%04x CX=%04x DX=%04x) "
-            "at CS:IP=%04x:%04x DS=%04x\n",
-            function, daze_read_u16(record), daze_read_u16(record + 2), daze_read_u16(record + 4),
-            daze_read_u16(record + 6), daze_read_u16(record + 20), daze_read_u16(record + 18),
-            daze_read_u16(record + 8));
+    const DazeDosInt21Request request = {
+      .ax = daze_read_u16(record),
+      .bx = daze_read_u16(record + 2),
+      .cx = daze_read_u16(record + 4),
+      .dx = daze_read_u16(record + 6),
+      .ds = daze_read_u16(record + 8),
+    };
+    daze_dos_int21_log_unsupported(&request, daze_read_u16(record + 20),
+                                   daze_read_u16(record + 18));
   }
   if (metrics != NULL) {
     metrics->kvm_boundary_broker_calls++;

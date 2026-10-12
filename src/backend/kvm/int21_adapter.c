@@ -268,11 +268,6 @@ DazeKvmPreflightBoundaryDisposition daze_kvm_int21_dispatch(
     return DAZE_KVM_PREFLIGHT_BOUNDARY_HANDLED;
   }
   case DAZE_DOS_FILE_ATTR:
-    if ((uint8_t)ax == 1) {
-      daze_write_u16(mailbox, 1);
-      reply_carry(mailbox, 1);
-      return DAZE_KVM_PREFLIGHT_BOUNDARY_HANDLED;
-    }
     return DAZE_KVM_PREFLIGHT_BOUNDARY_UNSUPPORTED;
   case DAZE_DOS_SET_VECTOR: {
     if (process_state == NULL) return DAZE_KVM_PREFLIGHT_BOUNDARY_FAILED;

@@ -12,6 +12,7 @@
 
 #include "bios_adapter.h"
 #include "int21_service.h"
+#include "int21_diagnostic.h"
 #include "descriptor.h"
 #include "file_service.h"
 #include "image.h"
@@ -315,13 +316,12 @@ int daze_unicorn_int21_dispatch(uc_engine *uc, DazeUnicornEngine *engine, DazeUn
     skip_interrupt_instruction(uc, run);
     return 1;
   }
-  case 0x43:
-    if ((uint8_t)ax != 0x01) return 0;
-    fprintf(stderr, "  DOS 21h/43h unsupported operation %u\n", (uint8_t)ax);
-    set_reg16(uc, UC_X86_REG_AX, 1);
-    set_carry(uc, 1);
-    skip_interrupt_instruction(uc, run);
-    return 1;
+  case 0x43: {
+    const DazeDosInt21Request request = capture_int21_request(uc);
+    daze_dos_int21_log_unsupported(&request, get_reg16(uc, UC_X86_REG_CS),
+                                   get_reg16(uc, UC_X86_REG_IP));
+  }
+    return 0;
   case 0x4b: {
     DazeDosInt21Result classification;
     const DazeDosInt21Request request = {.ax = ax};
@@ -422,10 +422,11 @@ int daze_unicorn_int21_dispatch(uc_engine *uc, DazeUnicornEngine *engine, DazeUn
     run->exit_code = (uint8_t)ax;
     run->terminated = 1;
     return 1;
-  default:
-    fprintf(stderr, "  unsupported DOS 21h function %02xh (AX=%04x BX=%04x CX=%04x DX=%04x)\n",
-            function, ax, get_reg16(uc, UC_X86_REG_BX), get_reg16(uc, UC_X86_REG_CX),
-            get_reg16(uc, UC_X86_REG_DX));
+  default: {
+    const DazeDosInt21Request request = capture_int21_request(uc);
+    daze_dos_int21_log_unsupported(&request, get_reg16(uc, UC_X86_REG_CS),
+                                   get_reg16(uc, UC_X86_REG_IP));
+  }
     return 0;
   }
 }

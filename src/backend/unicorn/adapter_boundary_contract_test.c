@@ -102,7 +102,12 @@ static int dos_matrix(DazeUnicornDpmiTestDriver *d) {
   pass &= dos_call(d, 0x3501, 0, 0, 0, 0x3501, 0) &&
           get_reg16(d->engine, UC_X86_REG_ES) == 0x1000 &&
           get_reg16(d->engine, UC_X86_REG_BX) == 0x456;
-  pass &= dos_call(d, 0x4301, 0, 0, 0x100, 1, 1);
+  pass &= dos_call(d, 0x4301, 0, 0, 0x100, 0x4301, 0);
+  set_reg16(d->engine, UC_X86_REG_AX, 0x4302);
+  set_reg16(d->engine, UC_X86_REG_IP, 0x100);
+  pass &= !daze_unicorn_int21_dispatch(d->engine, &d->context.engine, &d->context.run,
+                                       &d->context.process, &files) &&
+          get_reg16(d->engine, UC_X86_REG_IP) == 0x100;
   pass &= dos_call(d, 0x4b00, 0, 0, 0x100, 2, 1) && !d->context.process.child_process.active;
   const DazeDosRuntimeProcessState before = d->context.process;
   set_reg16(d->engine, UC_X86_REG_AX, 0xff00);
