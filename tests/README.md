@@ -125,7 +125,9 @@ tests reset the counters. The default local command still performs all stages.
 
 CI builds and runs Linux amd64 Debug, Release, and static variants with both
 GCC and Clang; ASan is also built and tested there. The pinned external suite
-runs against both Linux Release variants, with IPO enabled to match packaging.
+runs against both Linux Release variants. IPO matches packaging for GCC builds
+and non-static Clang Release; Clang's static Release is validated without IPO
+because ThinLTO fails on its duplicate archive link inputs.
 The release workflow also runs `--version` on each exported Linux binary.
 Native Linux ARM64 builds and tests
 Debug, Release, and static variants with GCC, then runs the Unicorn external

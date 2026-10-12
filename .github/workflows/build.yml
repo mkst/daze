@@ -15,7 +15,7 @@ jobs:
   linux-amd64:
     name: Linux amd64 (${{ matrix.compiler }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -71,7 +71,8 @@ jobs:
           for preset in $BUILD_PRESETS; do
             cmake_args=()
             unicorn_library="$RUNNER_TEMP/unicorn-normal-build/libunicorn.a"
-            if [ "$preset" = release ] || [ "$preset" = release-static ]; then
+            if [ "$preset" = release ] || \
+              { [ "$preset" = release-static ] && [ "$CC" = gcc ]; }; then
               cmake_args+=(-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON)
               unicorn_library="$RUNNER_TEMP/unicorn-ipo-build/libunicorn.a"
             fi
@@ -116,7 +117,7 @@ jobs:
   arm64:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
