@@ -23,8 +23,12 @@ static void boundaries(void) {
   assert(daze_raw_vector_projection_forget_allocation(slots, 2, 0x9999) == 0);
   assert(memcmp(before, slots, sizeof(slots)) == 0);
   assert(daze_raw_vector_projection_forget_allocation(slots, 2, 0x1000) == 2);
-  const DazeRawVectorProjection empty[2] = {0};
-  assert(memcmp(empty, slots, sizeof(slots)) == 0);
+  for (size_t index = 0; index < 2; ++index) {
+    assert(slots[index].selector == 0);
+    assert(slots[index].allocation_segment == 0);
+    assert(slots[index].allocation_paragraphs == 0);
+    assert(slots[index].in_use == 0);
+  }
   assert(daze_raw_vector_projection_record(slots, 2, 0x1014, 0x1010, 2, 1));
   assert(slots[0].selector == 0x1014 && slots[0].allocation_segment == 0x1010 &&
          slots[0].allocation_paragraphs == 2 && !slots[1].in_use);
