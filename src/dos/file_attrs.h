@@ -13,5 +13,7 @@ typedef struct {
 
 int daze_dos_file_attrs_get(const DazeDosfsMounts *mounts, const char *guest_path,
                             DazeDosFileAttrs *result);
+int daze_dos_file_attrs_set(const DazeDosfsMounts *mounts, const char *guest_path,
+                            uint16_t attributes, DazeDosFileAttrs *result);
 
 #endif

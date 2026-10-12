@@ -446,7 +446,8 @@ reply:
 static DazeDosInt21DispatchStatus dispatch_file_attributes(const DazeDosInt21Context *context,
                                                            const DazeDosInt21Request *request,
                                                            DazeDosInt21Result *result) {
-  if ((uint8_t)request->ax != 0) return DAZE_DOS_INT21_DISPATCH_OK;
+  const uint8_t operation = (uint8_t)request->ax;
+  if (operation > 1) return DAZE_DOS_INT21_DISPATCH_OK;
   if (context->files == NULL || context->files->mounts == NULL)
     return DAZE_DOS_INT21_DISPATCH_INVALID_ARGUMENT;
   char path[128];
@@ -454,12 +455,18 @@ static DazeDosInt21DispatchStatus dispatch_file_attributes(const DazeDosInt21Con
     read_asciiz(context, request->ds, request->dx, path, sizeof(path));
   if (read_status != DAZE_DOS_INT21_DISPATCH_OK) return read_status;
   DazeDosFileAttrs attributes;
-  if (!daze_dos_file_attrs_get(context->files->mounts, path, &attributes))
+  if (operation == 0) {
+    if (!daze_dos_file_attrs_get(context->files->mounts, path, &attributes))
+      return DAZE_DOS_INT21_DISPATCH_INVALID_ARGUMENT;
+  } else if (!daze_dos_file_attrs_set(context->files->mounts, path, request->cx, &attributes)) {
     return DAZE_DOS_INT21_DISPATCH_INVALID_ARGUMENT;
+  }
   result->disposition = DAZE_DOS_INT21_HANDLED;
   if (attributes.successful) {
-    result->register_write_mask = DAZE_DOS_INT21_REG_CX;
-    result->cx = attributes.attributes;
+    if (operation == 0) {
+      result->register_write_mask = DAZE_DOS_INT21_REG_CX;
+      result->cx = attributes.attributes;
+    }
     set_flag(result, DAZE_DOS_INT21_FLAG_CF, 0);
   } else {
     result->register_write_mask = DAZE_DOS_INT21_REG_AX;

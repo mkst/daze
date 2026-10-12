@@ -713,7 +713,19 @@ int main(void) {
     if (daze_kvm_preflight_boundary_broker(&machine, &files, &process_state, &dos_memory, 0x2200,
                                            record, mailbox,
                                            &result) != DAZE_KVM_PREFLIGHT_BOUNDARY_HANDLED ||
-        daze_read_u16(mailbox) != 1 || (daze_read_u16(mailbox + 14) & 1u) == 0)
+        daze_read_u16(mailbox) != 2 || (daze_read_u16(mailbox + 14) & 1u) == 0)
+      return 1;
+
+    memcpy(guest + 0x1000, "PLAIN.TXT", sizeof("PLAIN.TXT"));
+    memset(record, 0, sizeof(record));
+    memset(mailbox, 0xff, sizeof(mailbox));
+    daze_write_u16(record, 0x4301);
+    daze_write_u16(record + 8, 0x0100);
+    daze_write_u16(record + 16, 0x0021);
+    if (daze_kvm_preflight_boundary_broker(&machine, &files, &process_state, &dos_memory, 0x2200,
+                                           record, mailbox,
+                                           &result) != DAZE_KVM_PREFLIGHT_BOUNDARY_HANDLED ||
+        daze_read_u16(mailbox) != 0x4301 || (daze_read_u16(mailbox + 14) & 1u) != 0)
       return 1;
   }
 

@@ -58,6 +58,12 @@ int main(void) {
     fprintf(stderr, "file attrs: null-input contract violation not rejected\n");
     return 1;
   }
+  if (daze_dos_file_attrs_set(NULL, "PLAIN.TXT", 0, &attrs) ||
+      daze_dos_file_attrs_set(&mounts, NULL, 0, &attrs) ||
+      daze_dos_file_attrs_set(&mounts, "PLAIN.TXT", 0, NULL)) {
+    fprintf(stderr, "file attrs set: null-input contract violation not rejected\n");
+    return 1;
+  }
   fprintf(stderr, "file attrs: null inputs rejected\n");
   return 0;
 }

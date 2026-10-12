@@ -1,9 +1,12 @@
 #include "file_attrs.h"
 
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+#include "dos_error.h"
 
 int daze_dos_file_attrs_get(const DazeDosfsMounts *mounts, const char *guest_path,
                             DazeDosFileAttrs *result) {
@@ -22,5 +25,38 @@ int daze_dos_file_attrs_get(const DazeDosfsMounts *mounts, const char *guest_pat
   close(fd);
   result->attributes = S_ISDIR(information.st_mode) ? 0x10 : 0x20;
   result->successful = 1;
+  return 1;
+}
+
+int daze_dos_file_attrs_set(const DazeDosfsMounts *mounts, const char *guest_path,
+                            uint16_t attributes, DazeDosFileAttrs *result) {
+  if (mounts == NULL || guest_path == NULL || result == NULL) return 0;
+
+  /* CX=0 has no host-side state to change; other attribute bits are unrepresented. */
+  if (attributes != 0) {
+    result->successful = 0;
+    result->dos_error = DAZE_DOS_ERR_ACCESS_DENIED;
+    return 1;
+  }
+
+  int drive = mounts->default_drive;
+  if (guest_path[0] != '\0' && guest_path[1] == ':') {
+    const int letter = toupper((unsigned char)guest_path[0]) - 'A';
+    if (letter < 0 || letter >= DAZE_DOSFS_MAX_DRIVES) {
+      result->successful = 0;
+      result->dos_error = DAZE_DOS_ERR_INVALID_DRIVE;
+      return 1;
+    }
+    drive = letter;
+  }
+  if (daze_dosfs_mount_is_readonly(mounts, drive)) {
+    result->successful = 0;
+    result->dos_error = DAZE_DOS_ERR_ACCESS_DENIED;
+    return 1;
+  }
+
+  DazeDosFileAttrs existing;
+  if (!daze_dos_file_attrs_get(mounts, guest_path, &existing)) return 0;
+  *result = existing;
   return 1;
 }

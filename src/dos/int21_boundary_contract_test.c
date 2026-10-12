@@ -114,7 +114,7 @@ int main(void) {
     dispatch(&missing, files_required[i], DAZE_DOS_INT21_DISPATCH_INVALID_ARGUMENT);
     CHECK(memcmp(&handles, &before, sizeof(handles)) == 0);
   }
-  const uint16_t mounts_required[] = {0x1900, 0x3c00, 0x4100, 0x4300,
+  const uint16_t mounts_required[] = {0x1900, 0x3c00, 0x4100, 0x4300, 0x4301,
                                       0x4700, 0x4e00, 0x5600, 0x5a00};
   files.mounts = NULL;
   for (size_t i = 0; i < sizeof(mounts_required) / sizeof(mounts_required[0]); ++i)
@@ -140,7 +140,7 @@ int main(void) {
   memcpy(memory.bytes, "MISSING.TXT", 12);
   missing = context;
   missing.guest_memory.read = NULL;
-  const uint16_t path_reads[] = {0x3c00, 0x4100, 0x4300, 0x4e00, 0x5600};
+  const uint16_t path_reads[] = {0x3c00, 0x4100, 0x4300, 0x4301, 0x4e00, 0x5600};
   for (size_t i = 0; i < sizeof(path_reads) / sizeof(path_reads[0]); ++i)
     dispatch(&missing, path_reads[i], DAZE_DOS_INT21_DISPATCH_INVALID_ARGUMENT);
   dispatch(&missing, 0x5a00, DAZE_DOS_INT21_DISPATCH_INVALID_ARGUMENT);
@@ -221,7 +221,7 @@ int main(void) {
   mounts.default_drive = -1;
   error_reply(dispatch(&context, 0x4700, DAZE_DOS_INT21_DISPATCH_OK), 15);
   mounts.default_drive = 2;
-  const uint16_t unsupported[] = {0x6301, 0x5d00, 0x4301, 0x4401};
+  const uint16_t unsupported[] = {0x6301, 0x5d00, 0x4302, 0x4401};
   for (size_t i = 0; i < sizeof(unsupported) / sizeof(unsupported[0]); ++i) {
     result = dispatch(&context, unsupported[i], DAZE_DOS_INT21_DISPATCH_OK);
     CHECK(result.disposition == DAZE_DOS_INT21_UNSUPPORTED && result.register_write_mask == 0 &&

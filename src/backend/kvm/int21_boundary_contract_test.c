@@ -161,6 +161,18 @@ int main(int argc, char **argv) {
     CHECK(accounting.file_handle == 0 && !accounting.reply_ds_present && mailbox[0] == 0xa5);
     machine.guest = guest;
   }
+  DazeDosfsMounts mounts;
+  daze_dosfs_mounts_init(&mounts);
+  files.mounts = &mounts;
+  daze_write_u16(record, 0x4300);
+  daze_write_u16(record + 6, 0);
+  daze_write_u16(record + 8, 0x0800);
+  CHECK(daze_kvm_int21_dispatch(&machine, &files, &process, NULL, record, mailbox, NULL) ==
+        DAZE_KVM_PREFLIGHT_BOUNDARY_FAILED);
+  daze_write_u16(record, 0x4302);
+  CHECK(daze_kvm_int21_dispatch(&machine, &files, &process, NULL, record, mailbox, NULL) ==
+        DAZE_KVM_PREFLIGHT_BOUNDARY_UNSUPPORTED);
+  files.mounts = NULL;
   daze_write_u16(record + 16, 0x2f);
   CHECK(daze_kvm_int21_dispatch(&machine, &files, &process, NULL, record, mailbox, NULL) ==
         DAZE_KVM_PREFLIGHT_BOUNDARY_UNSUPPORTED);
