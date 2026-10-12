@@ -90,7 +90,7 @@ static void loop_case(int mode, int metrics) {
   DazeUnicornInterruptContext interrupt = {.context = &context};
   assert(uc_hook_add(uc, &interrupt_hook, UC_HOOK_INTR, daze_on_interrupt, &interrupt, 1, 0) ==
          UC_ERR_OK);
-  DazeCommandResult result = run_unicorn_loop(uc, &context, NULL, entry);
+  DazeCommandResult result = run_unicorn_loop(uc, &context, NULL, entry, k_instruction_limit);
   assert(result.guest_execution_started);
   assert(result.disposition == (mode < 5 ? DAZE_COMMAND_COMPLETED : DAZE_COMMAND_POSTSTART_FAILED));
   if (mode < 5) {

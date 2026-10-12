@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,6 +14,23 @@
 #include "unicorn_image.h"
 #include "unicorn_run.h"
 #include "unicorn_services.h"
+
+static int instruction_limit_from_environment(size_t *limit) {
+  const char *value = getenv("DAZE_UNICORN_INSTRUCTION_LIMIT");
+  if (value == NULL) {
+    *limit = k_instruction_limit;
+    return 1;
+  }
+  if (value[0] < '0' || value[0] > '9') return 0;
+  for (const char *cursor = value; *cursor != '\0'; ++cursor)
+    if (*cursor < '0' || *cursor > '9') return 0;
+  errno = 0;
+  char *end = NULL;
+  const unsigned long long parsed = strtoull(value, &end, 10);
+  if (errno != 0 || end == value || *end != '\0' || parsed == 0 || parsed > SIZE_MAX) return 0;
+  *limit = (size_t)parsed;
+  return 1;
+}
 
 static int initialize_unicorn_prepared(uc_engine **out, const DazePreparedLaunch *launch,
                                        DazeUnicornContext *context) {
@@ -63,7 +81,8 @@ static void dispose_unicorn_operation(uc_engine *uc, DazeUnicornContext *context
 }
 
 static DazeCommandResult run_unicorn_loop(uc_engine *uc, DazeUnicornContext *context,
-                                          DazeDosfsFileService *files, uint32_t entry_address) {
+                                          DazeDosfsFileService *files, uint32_t entry_address,
+                                          size_t instruction_limit) {
   DazeCommandResult result = {.disposition = DAZE_COMMAND_POSTSTART_FAILED};
   uint32_t run_address = entry_address;
   struct timespec started;
@@ -76,7 +95,7 @@ static DazeCommandResult run_unicorn_loop(uc_engine *uc, DazeUnicornContext *con
     const uint64_t emulation_started =
       context->engine.metrics.enabled ? monotonic_nanoseconds() : 0;
     result.guest_execution_started = 1;
-    const uc_err error = uc_emu_start(uc, run_address, 0, 0, k_instruction_limit);
+    const uc_err error = uc_emu_start(uc, run_address, 0, 0, instruction_limit);
     const uint64_t emulation_finished =
       context->engine.metrics.enabled ? monotonic_nanoseconds() : 0;
     if (context->engine.metrics.enabled && emulation_finished >= emulation_started)
@@ -146,6 +165,12 @@ static DazeCommandResult run_unicorn_loop(uc_engine *uc, DazeUnicornContext *con
 DazeCommandResult daze_unicorn_run_prepared(DazePreparedLaunch *launch, DazeUnicornContext *context,
                                             const char *path) {
   DazeCommandResult result = {.disposition = DAZE_COMMAND_PRESTART_REJECTED};
+  size_t instruction_limit;
+  if (!instruction_limit_from_environment(&instruction_limit)) {
+    fprintf(stderr,
+            "invalid DAZE_UNICORN_INSTRUCTION_LIMIT: expected a positive decimal integer\n");
+    return result;
+  }
   const char *trace_error = daze_unicorn_trace_configure(
     &context->engine.diagnostic_trace, k_memory_size, getenv("DAZE_TRACE"),
     getenv("DAZE_TRACE_BEGIN"), getenv("DAZE_TRACE_END"), getenv("DAZE_DIAGNOSTIC_HISTORY"),
@@ -230,5 +255,6 @@ DazeCommandResult daze_unicorn_run_prepared(DazePreparedLaunch *launch, DazeUnic
       }
     }
   }
-  return run_unicorn_loop(uc, context, &files, ((uint32_t)cs << 4) + launch->header.initial_ip);
+  return run_unicorn_loop(uc, context, &files, ((uint32_t)cs << 4) + launch->header.initial_ip,
+                          instruction_limit);
 }
