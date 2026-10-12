@@ -165,9 +165,10 @@ static void prepared_trace(void) {
                          "DAZE_TRACE_END",
                          "DAZE_DIAGNOSTIC_HISTORY",
                          "DAZE_TRACE_DUMP_ADDRESS",
-                         "DAZE_TRACE_DUMP_SIZE"};
-  char *saved[6] = {0};
-  for (size_t i = 0; i < 6; ++i) {
+                         "DAZE_TRACE_DUMP_SIZE",
+                         "DAZE_UNICORN_INSTRUCTION_LIMIT"};
+  char *saved[7] = {0};
+  for (size_t i = 0; i < 7; ++i) {
     const char *value = getenv(names[i]);
     if (value != NULL) {
       saved[i] = strdup(value);
@@ -178,6 +179,7 @@ static void prepared_trace(void) {
   uint8_t image[64];
   DazePreparedLaunch launch = launch_fixture(image);
   DazeUnicornContext context = {0};
+  assert(setenv("DAZE_UNICORN_INSTRUCTION_LIMIT", "50000000", 1) == 0);
   assert(setenv("DAZE_TRACE", "1", 1) == 0);
   DazeCommandResult result = daze_unicorn_run_prepared(&launch, &context, "TEST.EXE");
   assert(result.disposition == DAZE_COMMAND_PRESTART_REJECTED && !result.guest_execution_started);
@@ -187,12 +189,54 @@ static void prepared_trace(void) {
   assert(result.disposition == DAZE_COMMAND_COMPLETED && result.dos_exit_code == 0x25 &&
          result.guest_execution_started);
   assert(context.engine.full_code_hook && context.engine.metrics.guest_instruction_count_available);
-  for (size_t i = 0; i < 6; ++i) {
+  for (size_t i = 0; i < 7; ++i) {
     if (saved[i] != NULL) {
       assert(setenv(names[i], saved[i], 1) == 0);
       free(saved[i]);
     } else
       assert(unsetenv(names[i]) == 0);
+  }
+}
+
+static void instruction_limit_configuration(void) {
+  const char *value = getenv("DAZE_UNICORN_INSTRUCTION_LIMIT");
+  char *saved = value == NULL ? NULL : strdup(value);
+  assert(value == NULL || saved != NULL);
+  size_t limit = 0;
+  assert(unsetenv("DAZE_UNICORN_INSTRUCTION_LIMIT") == 0);
+  assert(instruction_limit_from_environment(&limit) && limit == k_instruction_limit);
+  assert(setenv("DAZE_UNICORN_INSTRUCTION_LIMIT", "50000000", 1) == 0);
+  assert(instruction_limit_from_environment(&limit) && limit == 50000000);
+  const char *invalid[] = {"", "-1", "12x", "0",
+                           "99999999999999999999999999999999999999999999999999999999999999999999999"
+                           "99999999999999999999999"};
+  for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i) {
+    assert(setenv("DAZE_UNICORN_INSTRUCTION_LIMIT", invalid[i], 1) == 0);
+    assert(!instruction_limit_from_environment(&limit));
+  }
+  if (saved != NULL) {
+    assert(setenv("DAZE_UNICORN_INSTRUCTION_LIMIT", saved, 1) == 0);
+    free(saved);
+  } else {
+    assert(unsetenv("DAZE_UNICORN_INSTRUCTION_LIMIT") == 0);
+  }
+}
+
+static void prepared_instruction_limit_rejection(void) {
+  const char *value = getenv("DAZE_UNICORN_INSTRUCTION_LIMIT");
+  char *saved = value == NULL ? NULL : strdup(value);
+  assert(value == NULL || saved != NULL);
+  uint8_t image[64];
+  DazePreparedLaunch launch = launch_fixture(image);
+  DazeUnicornContext context = {0};
+  assert(setenv("DAZE_UNICORN_INSTRUCTION_LIMIT", "0", 1) == 0);
+  DazeCommandResult result = daze_unicorn_run_prepared(&launch, &context, "TEST.EXE");
+  assert(result.disposition == DAZE_COMMAND_PRESTART_REJECTED && !result.guest_execution_started);
+  if (saved != NULL) {
+    assert(setenv("DAZE_UNICORN_INSTRUCTION_LIMIT", saved, 1) == 0);
+    free(saved);
+  } else {
+    assert(unsetenv("DAZE_UNICORN_INSTRUCTION_LIMIT") == 0);
   }
 }
 
@@ -205,7 +249,9 @@ int main(void) {
     for (int mode = 0; mode < 8; ++mode)
       loop_case(mode, metrics);
   initialization();
+  instruction_limit_configuration();
   prepared_trace();
+  prepared_instruction_limit_rejection();
   fflush(stderr);
   assert(dup2(saved, STDERR_FILENO) >= 0);
   close(saved);
@@ -214,6 +260,7 @@ int main(void) {
   assert(fread(text, 1, sizeof(text) - 1, capture) > 0);
   assert(strstr(text, "emulation stopped with Invalid memory read") != NULL);
   assert(strstr(text, "invalid Unicorn trace configuration") != NULL);
+  assert(strstr(text, "invalid DAZE_UNICORN_INSTRUCTION_LIMIT") != NULL);
   assert(strstr(text, "Unicorn trace enabled for linear range 00010000..00010010") != NULL);
   assert(strstr(text, "cannot prepare MZ image and relocations") != NULL);
   assert(strstr(text, "unable to initialise guest memory") != NULL);
