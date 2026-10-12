@@ -207,9 +207,10 @@ static void instruction_limit_configuration(void) {
   assert(instruction_limit_from_environment(&limit) && limit == k_instruction_limit);
   assert(setenv("DAZE_UNICORN_INSTRUCTION_LIMIT", "50000000", 1) == 0);
   assert(instruction_limit_from_environment(&limit) && limit == 50000000);
-  const char *invalid[] = {"", "-1", "12x", "0",
-                           "99999999999999999999999999999999999999999999999999999999999999999999999"
-                           "99999999999999999999999"};
+  const char *invalid[] = {
+    "", "-1", "12x", "0",
+    ("99999999999999999999999999999999999999999999999999999999999999999999999"
+     "99999999999999999999999")};
   for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i) {
     assert(setenv("DAZE_UNICORN_INSTRUCTION_LIMIT", invalid[i], 1) == 0);
     assert(!instruction_limit_from_environment(&limit));
