@@ -40,6 +40,7 @@ jobs:
             --target export \
             --output type=local,dest=dist \
             .
+          dist/daze --version
       - name: Upload release artifacts
         uses: actions/upload-artifact@v7
         with:
@@ -83,6 +84,7 @@ jobs:
             --target export \
             --output type=local,dest=dist \
             .
+          dist/daze --version
           tar -czf dist/daze-linux-arm64.tar.gz -C dist \
             daze LICENSE.md THIRD_PARTY_NOTICES.md BUILD-INFO.txt licenses
       - name: Install macOS build tools

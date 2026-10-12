@@ -123,13 +123,21 @@ and writes `gcovr.cfg` in the report directory. The action runs there, then
 inventory and subsystem baselines. Contract reports are checked before local
 tests reset the counters. The default local command still performs all stages.
 
-CI runs portable Unicorn regressions and coverage, dual-backend KVM coverage
-and all 42 required pairs, and KVM-only local/external suites.
-Ubuntu ARM64 and macOS ARM64 jobs build Unicorn's
-x86 guest engine and run portable local tests and Unicorn external regressions.
-They validate host portability without claiming KVM coverage. KVM jobs require
-a runner with usable `/dev/kvm` and fail if VM creation is unavailable. Reports
-and failed-run evidence are uploaded; benchmarks remain outside build gates.
+CI builds and runs Linux amd64 Debug, Release, and static variants with both
+GCC and Clang; ASan is also built and tested there. The pinned external suite
+runs against both Linux Release variants. IPO matches packaging for GCC builds
+and non-static Clang Release; Clang's static Release is validated without IPO
+because ThinLTO fails on its duplicate archive link inputs.
+The release workflow also runs `--version` on each exported Linux binary.
+Native Linux ARM64 builds and tests
+Debug, Release, and static variants with GCC, then runs the Unicorn external
+suite against both Release variants. Native macOS ARM64 builds and tests Debug
+and Release with Apple Clang, then runs the Unicorn external suite against
+Release. These ARM64 jobs validate host portability without claiming KVM
+coverage. Linux amd64 jobs require usable `/dev/kvm` and fail if VM creation is
+unavailable. Separate jobs retain the coverage gates and KVM-only local and
+external suites. Reports and failed-run evidence are uploaded; benchmarks
+remain outside build gates.
 `EnricoMi/publish-unit-test-result-action` publishes JUnit test summaries, and
 `irongut/CodeCoverageSummary` renders line/branch coverage from gcovr's Cobertura
 reports. These summaries run after failures when reports exist and write only

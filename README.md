@@ -1,6 +1,6 @@
 # ![daze logo](/logo.svg)
 
-**Daze** is a lightweight DOS runtime for running legacy command-line tools on Linux (x86_64 and ARM64) and macOS (Apple Silicon) systems.
+**Daze** is a lightweight DOS runtime for running legacy command-line tools on modern Linux (x86_64 and ARM64) and macOS (Apple Silicon) systems.
 
 Designed primarily for old compilers, assemblers and other build tools, Daze provides a minimal DOS environment with fast startup, without requiring DOS itself, disk images or a full PC emulator.
 
