@@ -6,11 +6,8 @@
 
 #include "int21_service.h"
 
-/* Keep unsupported INT 21h diagnostics identical across execution backends.
- * They are unconditional today, matching the existing backend behavior. */
 static inline void daze_dos_int21_log_unsupported(const DazeDosInt21Request *request, uint16_t cs,
                                                   uint16_t ip) {
-  if (request == NULL) return;
   fprintf(stderr,
           "unsupported DOS 21h function %02xh (AX=%04x BX=%04x CX=%04x DX=%04x) "
           "at CS:IP=%04x:%04x DS=%04x\n",

@@ -32,10 +32,7 @@ int daze_dos_file_attrs_set(const DazeDosfsMounts *mounts, const char *guest_pat
                             uint16_t attributes, DazeDosFileAttrs *result) {
   if (mounts == NULL || guest_path == NULL || result == NULL) return 0;
 
-  /* Daze currently exposes files as normal/archive and directories as
-   * directory. CX=0 is the normal-file attribute request used by CC1PSX;
-   * it has no host-side state to change. Other DOS attribute bits do not yet
-   * have a host representation. */
+  /* CX=0 has no host-side state to change; other attribute bits are unrepresented. */
   if (attributes != 0) {
     result->successful = 0;
     result->dos_error = DAZE_DOS_ERR_ACCESS_DENIED;
