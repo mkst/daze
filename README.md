@@ -1,6 +1,6 @@
 # ![daze logo](/logo.svg)
 
-**Daze** is a lightweight DOS runtime for running legacy command-line tools on modern Linux systems.
+**Daze** is a lightweight DOS runtime for running legacy command-line tools on Linux (x86_64 and ARM64) and macOS (Apple Silicon) systems.
 
 Designed primarily for old compilers, assemblers and other build tools, Daze provides a minimal DOS environment with fast startup, without requiring DOS itself, disk images or a full PC emulator.
 
@@ -102,7 +102,7 @@ See the [diagnostics guide](docs/diagnostics.md) for troubleshooting.
 - C compiler (GCC or Clang)
 - CMake 3.25 or newer
 - Ninja
-- Linux x86 with KVM support, or Unicorn 2.1.4 or newer
+- Linux x86 with KVM support, or Unicorn 2.1.4 or newer on other supported hosts.
 
 ### Build
 

@@ -48,6 +48,14 @@ Ordinary execution retains only its required narrow gate hooks. These settings
 are read only when Unicorn is selected, including an automatic pre-start
 fallback; they do not change backend selection or describe KVM execution.
 
+## Unicorn instruction limit
+
+Set `DAZE_UNICORN_INSTRUCTION_LIMIT=50000000` to allow up to 50 million
+instructions per Unicorn emulation run. The default is 20 million. The limit
+applies to each emulation run between runtime boundaries, not cumulatively to
+the whole DOS program. The value must be a positive decimal integer; an invalid
+value is rejected before guest execution. KVM has no equivalent limit.
+
 ## KVM failure records
 
 Retained KVM failure records observe raw exits, execution addresses, live
