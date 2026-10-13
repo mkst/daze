@@ -9,10 +9,11 @@
 #include <linux/kvm.h>
 #include <sys/ioctl.h>
 
-static int frame_contract(uint16_t initial_sp, int restores_ax, int ax_only) {
+static int frame_contract(uint16_t initial_sp, int restores_ax, int ax_only, int dpl_zero) {
   enum { GUEST_SIZE = 0x12000, CODE = 0x1000, GATE = 0x1100 };
   DazeKvmMachine machine;
   if (daze_kvm_machine_init(&machine, GUEST_SIZE) != DAZE_KVM_MACHINE_OK) return 0;
+  if (dpl_zero == 2) machine.sync_regs_mask = 0;
   uint8_t *const guest = machine.guest;
   const uint8_t code[] = {
     0xcd,
@@ -40,6 +41,18 @@ static int frame_contract(uint16_t initial_sp, int restores_ax, int ax_only) {
     return 0;
   }
   struct kvm_regs initial;
+  struct kvm_sregs initial_sregs;
+  if (dpl_zero && (ioctl(machine.vcpu, KVM_GET_SREGS, &initial_sregs) < 0)) {
+    daze_kvm_machine_destroy(&machine);
+    return 0;
+  }
+  if (dpl_zero) {
+    initial_sregs.es.dpl = 0;
+    if (ioctl(machine.vcpu, KVM_SET_SREGS, &initial_sregs) < 0) {
+      daze_kvm_machine_destroy(&machine);
+      return 0;
+    }
+  }
   if (ioctl(machine.vcpu, KVM_GET_REGS, &initial) < 0) {
     daze_kvm_machine_destroy(&machine);
     return 0;
@@ -84,13 +97,14 @@ static int frame_contract(uint16_t initial_sp, int restores_ax, int ax_only) {
                        frame.di == 0x090a && frame.ds == 0x0300 && frame.es == 0x0400 &&
                        frame.return_cs == 0x0100 && frame.return_ip == 2 &&
                        frame.sp == (uint16_t)(initial_sp - 8);
+  struct kvm_sregs parked_sregs = {0};
   const int replied =
-    captured &&
+    captured && ioctl(machine.vcpu, KVM_GET_SREGS, &parked_sregs) == 0 &&
     daze_kvm_runner_gate_frame_reply(&machine, &frame, reply) == DAZE_KVM_RUNNER_GATE_RESUME_OK &&
     ioctl(machine.vcpu, KVM_RUN, 0) == 0 &&
     ((const struct kvm_run *)machine.run)->exit_reason == KVM_EXIT_HLT;
-  struct kvm_regs regs;
-  struct kvm_sregs sregs;
+  struct kvm_regs regs = {0};
+  struct kvm_sregs sregs = {0};
   const int completed =
     replied && ioctl(machine.vcpu, KVM_GET_REGS, &regs) == 0 &&
     ioctl(machine.vcpu, KVM_GET_SREGS, &sregs) == 0 && regs.rip == 3 &&
@@ -100,15 +114,25 @@ static int frame_contract(uint16_t initial_sp, int restores_ax, int ax_only) {
     (uint16_t)regs.rsi == daze_read_u16(reply + 8) &&
     (uint16_t)regs.rdi == daze_read_u16(reply + 10) && sregs.ds.selector == 0x0300 &&
     sregs.es.selector == daze_read_u16(reply + 12) && (uint16_t)regs.rflags == 0x0246 &&
-    (uint16_t)regs.rsp == initial_sp;
+    (uint16_t)regs.rsp == initial_sp &&
+    (!dpl_zero || memcmp(&sregs.es, &parked_sregs.es, sizeof(sregs.es)) == 0);
+  if (!completed)
+    fprintf(stderr,
+            "ES reply sp=%04x restoring=%d ax-only=%d dpl-zero=%d exit=%u "
+            "cs=%04x ip=%llx es=%04x base=%llx limit=%x dpl=%u flags=%llx\n",
+            initial_sp, restores_ax, ax_only, dpl_zero,
+            ((const struct kvm_run *)machine.run)->exit_reason, sregs.cs.selector,
+            (unsigned long long)regs.rip, sregs.es.selector, (unsigned long long)sregs.es.base,
+            sregs.es.limit, sregs.es.dpl, (unsigned long long)regs.rflags);
   daze_kvm_machine_destroy(&machine);
   return completed;
 }
 #else
-static int frame_contract(uint16_t initial_sp, int restores_ax, int ax_only) {
+static int frame_contract(uint16_t initial_sp, int restores_ax, int ax_only, int dpl_zero) {
   (void)initial_sp;
   (void)restores_ax;
   (void)ax_only;
+  (void)dpl_zero;
   return 1;
 }
 #endif
@@ -184,9 +208,11 @@ int main(void) {
   const int invalid = status == DAZE_KVM_RUNNER_GATE_RESUME_INVALID &&
                       memcmp(guest + MAILBOX, before, sizeof(before)) == 0;
   daze_kvm_machine_destroy(&machine);
-  const int frame_valid = frame_contract(0x0100, 0, 0) && frame_contract(0, 0, 0) &&
-                          frame_contract(0x0100, 1, 0) && frame_contract(0, 1, 0) &&
-                          frame_contract(0x0100, 1, 1) && frame_contract(0, 1, 1);
+  const int frame_valid = frame_contract(0x0100, 0, 0, 0) && frame_contract(0, 0, 0, 0) &&
+                          frame_contract(0x0100, 1, 0, 0) && frame_contract(0, 1, 0, 0) &&
+                          frame_contract(0x0100, 1, 1, 0) && frame_contract(0, 1, 1, 0) &&
+                          frame_contract(0x0100, 1, 1, 1) && frame_contract(0, 1, 1, 1) &&
+                          frame_contract(0x0100, 1, 1, 2);
   if (!valid || !invalid || !frame_valid) {
     fprintf(stderr, "KVM runner gate resume contract failed valid=%d invalid=%d frame=%d\n", valid,
             invalid, frame_valid);

@@ -124,6 +124,12 @@ int daze_kvm_runner_gate_frame_reply(DazeKvmMachine *machine, const DazeKvmRunne
   regs.rdi = replace_low16(regs.rdi, daze_read_u16(reply + 10));
   const struct kvm_segment previous_es = sregs.es;
   real_data_segment(&sregs.es, daze_read_u16(reply + 12));
+  if (!(sregs.cr0 & 1) && !(regs.rflags & (1u << 17)) && previous_es.dpl == 0) {
+    /* Retain the already-running real-mode cache when only DPL normalization differs. */
+    struct kvm_segment retained_es = sregs.es;
+    retained_es.dpl = 0;
+    if (memcmp(&previous_es, &retained_es, sizeof(previous_es)) == 0) sregs.es = previous_es;
+  }
   const int es_changed = memcmp(&previous_es, &sregs.es, sizeof(previous_es)) != 0;
   daze_write_u16((uint8_t *)machine->guest + flags_address - 6u, daze_read_u16(reply));
   daze_write_u16((uint8_t *)machine->guest + flags_address, daze_read_u16(reply + 14));
