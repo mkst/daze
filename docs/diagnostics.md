@@ -11,6 +11,23 @@ they do not isolate real-mode callback overhead. Descriptor-cache mismatches,
 real-mode DPMI services and protected-return breakpoints retain the host return
 path. Callback phase timers are nested, so do not add them to KVM_RUN totals.
 
+`kvm-rm-procedure-native` counts eligible 0301h requests that enter real mode
+through the guest helper. Add it to the host detour count on the
+`kvm-rm-procedure total` line for the logical callback count. A host detour's
+timers may include several subsequent native callbacks before the next
+protected exit. Guard rejections use the host entry path; real-mode DPMI
+services retain the host return path and its saved segment caches.
+
+The helper source is `src/backend/kvm/rm_entry.S`. Its checked-in C arrays
+allow normal builds without an assembler. To regenerate them with GNU
+binutils:
+
+```sh
+python3 tools/generate_kvm_rm_entry.py | .venv/bin/clang-format > /tmp/rm_entry_code.h
+```
+
+Apply that output to `src/backend/kvm/rm_entry_code.h` when changing the helper.
+
 Normal execution has no cumulative limit on serviced DOS/DPMI boundaries or
 backend continuations. Bounded diagnostic records do not limit command size.
 Unicorn retains its per-emulation instruction guard. To bound elapsed time,

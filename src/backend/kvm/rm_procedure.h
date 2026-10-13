@@ -28,4 +28,8 @@ typedef struct {
 int daze_kvm_rm_procedure_reflect(const DazeKvmRmProcedureInput *input,
                                   DazeKvmDpmiEntryResult *successor);
 
+int daze_kvm_rm_entry_install(DazeKvmMachine *machine, uint32_t epilogue);
+int daze_kvm_rm_entry_continue(const DazeKvmRmProcedureInput *input,
+                               DazeKvmDpmiEntryResult *successor);
+
 #endif

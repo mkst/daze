@@ -1,6 +1,7 @@
 #include "machine.h"
 #include "machine_private.h"
 #include "monotonic_clock.h"
+#include "rm_entry.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -249,7 +250,9 @@ int daze_kvm_machine_snapshot_restore(DazeKvmMachine *machine,
   if (ioctl(machine->vcpu, KVM_SET_SREGS, &state->sregs) < 0 ||
       ioctl(machine->vcpu, KVM_SET_REGS, &state->regs) < 0)
     return DAZE_KVM_MACHINE_FAILED;
+  daze_kvm_rm_entry_sync_metrics(machine);
   memcpy(machine->guest, snapshot->guest_bytes, machine->guest_size);
+  daze_kvm_rm_entry_invalidate(machine);
   return daze_kvm_machine_sync_refresh(machine);
 }
 int daze_kvm_machine_set_real_mode(DazeKvmMachine *m, uint16_t cs, uint16_t ip, uint16_t ss,

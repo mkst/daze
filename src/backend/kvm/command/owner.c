@@ -22,6 +22,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "rm_entry.h"
+
 static int continue_from_handoff(DazeKvmCommandOwnerHandoff *handoff,
                                  const DazeKvmCommandOwnerInput *input,
                                  const DazeKvmDpmiEntryResult *live_boundary,
@@ -966,6 +968,22 @@ dispatch_boundaries(DazeKvmCommandOwnerHandoff *handoff, const DazeKvmCommandOwn
     initial_boundary != NULL ? *initial_boundary : result->protected_gate.terminal;
   int first_boundary = 1;
   for (;;) {
+    daze_kvm_rm_entry_sync_metrics(machine);
+    if (gate->rm_entry_address && daze_kvm_rm_entry_active(machine) &&
+        daze_read_u16((const uint8_t *)machine->guest + 0x2a42) == 0 && !(boundary.cr0 & 1)) {
+      DazeKvmDpmiMediator native_mediator = mediator_for_gate(
+        machine, plan_input, gate, &input->transition_layout, input->state, dos_memory);
+      const DazeKvmRmProcedureInput native = {.machine = machine,
+                                              .mediator = &native_mediator,
+                                              .files = input->preflight.process.files,
+                                              .process_state = process_state,
+                                              .dpmi_entry_segment =
+                                                input->preflight.process.dpmi_entry_segment};
+      if (!daze_kvm_rm_entry_continue(&native, &boundary))
+        return DAZE_KVM_COMMAND_OWNER_POSTSTART_FAILED;
+      mediator_commit(&native_mediator, input->state);
+      continue;
+    }
     if (!daze_kvm_protected_gate_sync_virtual_interrupts(machine, gate,
                                                          &input->state->virtual_interrupts_enabled))
       return DAZE_KVM_COMMAND_OWNER_POSTSTART_FAILED;
@@ -974,6 +992,8 @@ dispatch_boundaries(DazeKvmCommandOwnerHandoff *handoff, const DazeKvmCommandOwn
     result->post_successor = boundary;
     result->post_successor_present = 1;
     if (gate->legacy_np_capture_address != 0) {
+      if (legacy.depth || boundary.observation.kind != DAZE_KVM_DPMI_ENTRY_EXIT_PIO)
+        daze_kvm_rm_entry_invalidate(machine);
       int legacy_status =
         daze_kvm_legacy_exception_boundary(machine, gate, input->state, &legacy, &boundary);
       if (legacy_status < 0) {
@@ -1012,6 +1032,7 @@ dispatch_boundaries(DazeKvmCommandOwnerHandoff *handoff, const DazeKvmCommandOwn
 
       continue;
     }
+    if (classification != DAZE_KVM_COMMAND_BOUNDARY_MEDIATOR) daze_kvm_rm_entry_invalidate(machine);
     switch (classification) {
     case DAZE_KVM_COMMAND_BOUNDARY_MEDIATOR: {
       uint16_t function, selector;
@@ -1019,6 +1040,7 @@ dispatch_boundaries(DazeKvmCommandOwnerHandoff *handoff, const DazeKvmCommandOwn
       if (!capture_mediator_request(machine, gate, &boundary, &function, &selector, &operand)) {
         return DAZE_KVM_COMMAND_OWNER_POSTSTART_FAILED;
       }
+      if (function != 0x0301 || legacy.depth) daze_kvm_rm_entry_invalidate(machine);
       result->post_return_function = function;
       result->post_return_selector = selector;
       result->post_return_operand = operand;
@@ -1511,6 +1533,11 @@ static int continue_from_handoff(DazeKvmCommandOwnerHandoff *handoff,
         result->transition_status = DAZE_KVM_TRANSITION_WRITER_OK;
       }
       if (result->transition_status == DAZE_KVM_TRANSITION_WRITER_OK) {
+        if (gate != NULL &&
+            !daze_kvm_rm_entry_install(&machine, gate_artifacts.rm_entry_epilogue)) {
+          result->transition_status = DAZE_KVM_DPMI_ENTRY_INVALID;
+          goto out;
+        }
         result->transition_stage = 4;
         result->transition_status = DAZE_KVM_DPMI_ENTRY_OK;
         result->transition_successor = *live_boundary;
@@ -1529,6 +1556,11 @@ static int continue_from_handoff(DazeKvmCommandOwnerHandoff *handoff,
           result->transition_status = DAZE_KVM_DPMI_ENTRY_INVALID;
         } else {
           result->transition_stage = 3;
+          if (gate != NULL &&
+              !daze_kvm_rm_entry_install(&machine, gate_artifacts.rm_entry_epilogue)) {
+            result->transition_status = DAZE_KVM_DPMI_ENTRY_INVALID;
+            goto out;
+          }
           result->transition_status = daze_kvm_dpmi_entry_run(
             &machine, &preflight.dpmi_handoff, &entry_layout, &result->transition_successor);
           result->transition_stage = 4;

@@ -53,12 +53,14 @@ typedef struct {
   uint8_t exception_gate_type;
   uint32_t legacy_np_capture_address;
   uint32_t virtual_handler_address, virtual_control_address;
+  uint32_t rm_entry_address;
 } DazeKvmProtectedGateLayout;
 
 typedef struct {
   uint8_t
     handler[DAZE_KVM_PROTECTED_GATE_HANDLER_MAX_SIZE + DAZE_KVM_PROTECTED_GATE_VIRTUAL_PREFIX_SIZE];
   size_t handler_size;
+  uint32_t rm_entry_epilogue;
   uint8_t idt_entry[8];
   uint8_t dos_handler[DAZE_KVM_PROTECTED_GATE_HANDLER_MAX_SIZE];
   size_t dos_handler_size;

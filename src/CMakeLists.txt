@@ -955,7 +955,7 @@ add_library(daze_kvm_rm_procedure STATIC backend/kvm/rm_procedure.c)
 daze_configure_c11_pedantic_target(daze_kvm_rm_procedure PUBLIC)
 target_link_libraries(daze_kvm_rm_procedure PUBLIC
   daze_kvm_machine daze_kvm_dpmi_entry daze_kvm_dpmi_mediator daze_kvm_runner_gate_resume
-  daze_dpmi_request
+  daze_dpmi_request daze_dpmi_descriptor
 )
 
 add_library(daze_kvm_state_save_gate STATIC backend/kvm/gate/state_save.c)

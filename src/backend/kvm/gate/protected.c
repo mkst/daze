@@ -10,6 +10,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include "rm_entry.h"
 
 #if defined(__linux__) && (defined(__x86_64__) || defined(__i386__))
 #include <linux/kvm.h>
@@ -320,6 +321,27 @@ int daze_kvm_protected_gate_build(const DazeKvmProtectedGateLayout *layout,
   built.default_dos_stub[size++] = (uint8_t)(layout->handler_selector >> 8);
   if (size != sizeof(built.default_dos_stub)) return 0;
   built.default_dos_stub_size = size;
+  if (layout->rm_entry_address != 0) {
+    if (layout->rm_entry_address != DAZE_KVM_RM_ENTRY_LINEAR ||
+        layout->handler_address != 0xfde800 || layout->record_address != 0xfdea00 ||
+        layout->mailbox_address != 0xfdea40 || layout->handler_selector != DAZE_SEL_GATE_CODE ||
+        layout->handler_data_selector != DAZE_SEL_GATE_DATA || layout->interrupt_gate_type != 0x8e)
+      return 0;
+    int patched = 0;
+    for (size_t i = 0; i + 4 < built.handler_size; ++i) {
+      if (memcmp(built.handler + i, (const uint8_t[]){0xb0, 0x31, 0xe6, 0xf4}, 4)) continue;
+      const size_t pos = i + 2;
+      if (built.handler_size + 3 > sizeof(built.handler)) return 0;
+      memmove(built.handler + pos + 5, built.handler + pos + 2, built.handler_size - pos - 2);
+      built.handler[pos] = 0xe9; /* jmp rel32: enter the guarded callback helper */
+      built.rm_entry_epilogue = layout->handler_address + (uint32_t)pos + 5;
+      daze_write_u32(built.handler + pos + 1, layout->rm_entry_address - built.rm_entry_epilogue);
+      built.handler_size += 3;
+      patched = 1;
+      break;
+    }
+    if (!patched) return 0;
+  }
   *output = built;
   return 1;
 }
