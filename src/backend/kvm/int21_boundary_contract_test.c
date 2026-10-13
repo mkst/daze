@@ -12,12 +12,15 @@
     }                                                                                              \
   } while (0)
 
-static int cpu_translation(void) {
+static int cpu_translation(int sync) {
 #if defined(__linux__) && (defined(__x86_64__) || defined(__i386__))
   DazeKvmMachine machine;
   int status = daze_kvm_machine_init(&machine, 0x8000);
   if (status == DAZE_KVM_MACHINE_UNAVAILABLE) return 77;
   CHECK(status == DAZE_KVM_MACHINE_OK);
+  if (!sync) machine.sync_regs_mask = 0;
+  DazeRunMetrics metrics = {.enabled = 1};
+  machine.run_metrics = &metrics;
   struct kvm_sregs sregs;
   CHECK(ioctl(machine.vcpu, KVM_GET_SREGS, &sregs) == 0);
   sregs.cr0 = 0x11;
@@ -26,6 +29,7 @@ static int cpu_translation(void) {
   sregs.es = (struct kvm_segment){
     .selector = 0x8c, .base = 0x4000, .limit = 0xffff, .present = 1, .s = 1, .type = 3};
   CHECK(ioctl(machine.vcpu, KVM_SET_SREGS, &sregs) == 0);
+  CHECK(daze_kvm_machine_sync_refresh(&machine) == DAZE_KVM_MACHINE_OK);
   uint8_t *guest = machine.guest;
   memset(guest, 0xa5, machine.guest_size);
   memcpy(guest + 0x3020, "FILE.TXT", 9);
@@ -44,6 +48,8 @@ static int cpu_translation(void) {
   CHECK(daze_read_u16(mailbox + 14) == 0x202 && guest[0x4020] == 0 &&
         memcmp(guest + 0x4021, "FILE    TXT", 11) == 0);
   CHECK(guest[0x860] == 0xa5 && guest[0x8e0] == 0xa5);
+  CHECK(metrics.kvm_regs_sync_get_calls ==
+        ((machine.sync_regs_mask & KVM_SYNC_X86_SREGS) != 0 ? 1u : 0u));
   daze_write_u16(record + 8, 0x94);
   CHECK(daze_kvm_int21_dispatch(&machine, &files, NULL, NULL, record, mailbox, NULL) ==
         DAZE_KVM_PREFLIGHT_BOUNDARY_FAILED);
@@ -51,18 +57,23 @@ static int cpu_translation(void) {
   daze_write_u16(record + 8, 0x84);
   sregs.es.base = 0x7ff0;
   CHECK(ioctl(machine.vcpu, KVM_SET_SREGS, &sregs) == 0);
+  CHECK(daze_kvm_machine_sync_refresh(&machine) == DAZE_KVM_MACHINE_OK);
   CHECK(daze_kvm_int21_dispatch(&machine, &files, NULL, NULL, record, mailbox, NULL) ==
         DAZE_KVM_PREFLIGHT_BOUNDARY_FAILED);
   CHECK(guest[0x7fff] == 0xa5);
   daze_kvm_machine_destroy(&machine);
   return 0;
 #else
+  (void)sync;
   return 77;
 #endif
 }
 
 int main(int argc, char **argv) {
-  if (argc == 2 && strcmp(argv[1], "--kvm") == 0) return cpu_translation();
+  if (argc == 2 && strcmp(argv[1], "--kvm") == 0) {
+    const int status = cpu_translation(1);
+    return status != 0 ? status : cpu_translation(0);
+  }
   uint8_t guest[0x8000] = {0}, record[24] = {0}, mailbox[16];
   DazeKvmMachine machine = {.guest = guest, .guest_size = sizeof(guest), .vcpu = -1};
   DazeInt21KvmGuestMemory memory = {.machine = &machine};
@@ -201,6 +212,25 @@ int main(int argc, char **argv) {
   daze_write_u16(record, 0x3000);
   CHECK(dispatch_shared_int21_reply(NULL, &files, &process, NULL, record, mailbox, NULL) == -1);
   machine.vcpu = INT_MAX;
+#if defined(__linux__) && (defined(__x86_64__) || defined(__i386__))
+  struct kvm_run run = {0};
+  run.s.regs.sregs.cr0 = 1;
+  run.s.regs.sregs.ds = (struct kvm_segment){.selector = 0x84, .base = 0x3000};
+  run.s.regs.sregs.es = (struct kvm_segment){.selector = 0x8c, .base = 0x4000};
+  machine.run = &run;
+  machine.sync_regs_mask = KVM_SYNC_X86_SREGS;
+  memcpy(guest + 0x3020, "FILE.TXT", 9);
+  daze_write_u16(record, 0x2900);
+  daze_write_u16(record + 8, 0x84);
+  daze_write_u16(record + 10, 0x8c);
+  daze_write_u16(record + 12, 0x20);
+  daze_write_u16(record + 14, 0x20);
+  CHECK(daze_kvm_int21_dispatch(&machine, &files, &process, NULL, record, mailbox, NULL) ==
+        DAZE_KVM_PREFLIGHT_BOUNDARY_HANDLED);
+  CHECK(guest[0x4020] == 0 && memcmp(guest + 0x4021, "FILE    TXT", 11) == 0);
+  machine.sync_regs_mask = 0;
+  daze_write_u16(record, 0x3000);
+#endif
   machine.run = guest;
   memcpy(before, mailbox, 16);
   CHECK(daze_kvm_int21_dispatch(&machine, &files, &process, NULL, record, mailbox, NULL) ==
