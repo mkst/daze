@@ -4,3 +4,4 @@
 /spike/
 /TMP/
 /unicorn/
+*.gcov

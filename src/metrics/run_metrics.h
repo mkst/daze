@@ -16,6 +16,25 @@ enum { DAZE_RUN_METRICS_DPMI_FUNCTION_CAPACITY = 32 };
 enum { DAZE_RUN_METRICS_VIRTUAL_INTERRUPT_SITE_CAPACITY = 16 };
 enum { DAZE_RUN_METRICS_RM_REFLECT_VECTOR_CAPACITY = 16 };
 
+enum {
+  DAZE_RUN_METRICS_RM_DATE,
+  DAZE_RUN_METRICS_RM_TIME,
+  DAZE_RUN_METRICS_RM_OTHER,
+  DAZE_RUN_METRICS_RM_COST_COUNT,
+};
+
+typedef struct {
+  uint64_t calls;
+  uint64_t total_nanoseconds;
+  uint64_t setup_nanoseconds;
+  uint64_t reflect_nanoseconds;
+  uint64_t cleanup_nanoseconds;
+  uint64_t resume_nanoseconds;
+  uint64_t reflect_run_nanoseconds;
+  uint64_t resume_run_nanoseconds;
+  uint64_t service_nanoseconds;
+} DazeRunMetricsRmProcedureCost;
+
 typedef struct {
   uint16_t function;
   uint64_t calls;
@@ -104,7 +123,6 @@ typedef struct {
   uint64_t kvm_rm_procedure_setup_retire_nanoseconds;
   uint64_t kvm_rm_procedure_setup_post_pio_capture_nanoseconds;
   uint64_t kvm_rm_procedure_setup_transition_nanoseconds;
-  uint64_t kvm_rm_procedure_setup_debug_arm_nanoseconds;
   uint64_t kvm_rm_procedure_reflect_nanoseconds;
   uint64_t kvm_rm_procedure_reflect_runner_calls;
   uint64_t kvm_rm_procedure_reflect_runner_nanoseconds;
@@ -116,6 +134,7 @@ typedef struct {
   uint64_t kvm_rm_procedure_resume_nanoseconds;
   uint64_t kvm_rm_procedure_resume_run_nanoseconds;
   uint64_t kvm_rm_procedure_resume_capture_nanoseconds;
+  DazeRunMetricsRmProcedureCost kvm_rm_procedure_costs[DAZE_RUN_METRICS_RM_COST_COUNT];
   uint64_t kvm_dpmi_mediator_calls;
   uint64_t kvm_dpmi_mediator_nanoseconds;
   DazeRunMetricsDpmiFunction kvm_dpmi_functions[DAZE_RUN_METRICS_DPMI_FUNCTION_CAPACITY];

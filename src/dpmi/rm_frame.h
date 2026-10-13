@@ -21,9 +21,7 @@ enum {
   DAZE_DPMI_RM_CS = 0x2c,
   DAZE_DPMI_RM_SP = 0x2e,
   DAZE_DPMI_RM_SS = 0x30,
-  /* The shared real-mode gate that the procedure far-jumps to on return. Its
-   * bytes are host-owned and are never executed; backends observe the jump
-   * before running them. */
+  /* Host-owned return gate: Unicorn intercepts arrival; KVM executes its HLT. */
   DAZE_DPMI_RM_GATE_LINEAR = 0x2300,
   DAZE_DPMI_RM_RETURN_IP = 0x0000,
   DAZE_DPMI_RM_RETURN_CS = 0x0230,

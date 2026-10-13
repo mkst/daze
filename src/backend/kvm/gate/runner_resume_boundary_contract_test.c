@@ -1,4 +1,25 @@
+#if defined(__linux__) && (defined(__x86_64__) || defined(__i386__))
+#include <linux/kvm.h>
+#include <stdarg.h>
+#include <sys/ioctl.h>
+
+static unsigned set_sregs_calls;
+
+static int counted_ioctl(int fd, unsigned long request, ...) {
+  va_list args;
+  va_start(args, request);
+  const unsigned long argument = va_arg(args, unsigned long);
+  va_end(args);
+  if (request == KVM_SET_SREGS) set_sregs_calls++;
+  return ioctl(fd, request, argument);
+}
+
+#define ioctl counted_ioctl
+#endif
+
 #include "runner_resume.c"
+
+#undef ioctl
 
 #include <limits.h>
 #include <stdio.h>
@@ -165,8 +186,18 @@ static int cpu_boundaries(void) {
   CHECK(daze_kvm_machine_sync_refresh(&machine) == DAZE_KVM_MACHINE_OK);
   CHECK(daze_kvm_runner_gate_frame_capture(&machine, 0x21, &frame) ==
         DAZE_KVM_RUNNER_GATE_RESUME_OK);
+  const unsigned unchanged_calls = set_sregs_calls;
   CHECK(daze_kvm_runner_gate_frame_reply(&machine, &frame, reply) ==
         DAZE_KVM_RUNNER_GATE_RESUME_OK);
+  CHECK(set_sregs_calls == unchanged_calls);
+  CHECK(ioctl(machine.vcpu, KVM_GET_SREGS, &sregs) == 0);
+  sregs.es.base++;
+  CHECK(ioctl(machine.vcpu, KVM_SET_SREGS, &sregs) == 0);
+  CHECK(daze_kvm_machine_sync_refresh(&machine) == DAZE_KVM_MACHINE_OK);
+  CHECK(daze_kvm_runner_gate_frame_reply(&machine, &frame, reply) ==
+        DAZE_KVM_RUNNER_GATE_RESUME_OK);
+  CHECK(set_sregs_calls == unchanged_calls + 1);
+  CHECK(ioctl(machine.vcpu, KVM_GET_SREGS, &sregs) == 0 && sregs.es.base == 0x11060);
   CHECK(metrics.kvm_gate_frame_capture_calls == 1 && metrics.kvm_gate_frame_reply_calls == 1);
   regs.rsp = 0xfff9;
   CHECK(ioctl(machine.vcpu, KVM_SET_REGS, &regs) == 0 &&

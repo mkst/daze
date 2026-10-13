@@ -109,11 +109,13 @@ int daze_kvm_runner_gate_frame_reply(DazeKvmMachine *machine, const DazeKvmRunne
   regs.rdx = replace_low16(regs.rdx, daze_read_u16(reply + 6));
   regs.rsi = replace_low16(regs.rsi, daze_read_u16(reply + 8));
   regs.rdi = replace_low16(regs.rdi, daze_read_u16(reply + 10));
+  const struct kvm_segment previous_es = sregs.es;
   real_data_segment(&sregs.es, daze_read_u16(reply + 12));
+  const int es_changed = memcmp(&previous_es, &sregs.es, sizeof(previous_es)) != 0;
   daze_write_u16((uint8_t *)machine->guest + flags_address, daze_read_u16(reply + 14));
   /* Use raw SETs: downstream ioctl installs bypass pending sync writes, which the next
    * KVM_RUN could otherwise overwrite. */
-  if (ioctl(machine->vcpu, KVM_SET_SREGS, &sregs) != 0 ||
+  if ((es_changed && ioctl(machine->vcpu, KVM_SET_SREGS, &sregs) != 0) ||
       ioctl(machine->vcpu, KVM_SET_REGS, &regs) != 0) {
     return DAZE_KVM_RUNNER_GATE_RESUME_FAILED;
   }
