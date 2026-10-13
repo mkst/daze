@@ -86,11 +86,11 @@ static int runner_frame_record(DazeKvmMachine *machine, uint8_t vector,
 static int install_gate(DazeKvmMachine *machine, uint8_t vector, uint16_t segment,
                         uint16_t offset) {
   const uint8_t gate[] = {
-    0x50,                       /* push ax */
-    0xb0, vector,               /* mov al, vector */
-    0xe6, DAZE_PORT_GATE,       /* out 0xf4,al */
-    0x83, 0xc4,           0x02, /* add sp,0x2 */
-    0xcf                        /* iret */
+    0x50,                 /* push ax */
+    0xb0, vector,         /* mov al,vector */
+    0xe6, DAZE_PORT_GATE, /* out 0xf4,al */
+    0x58,                 /* pop ax */
+    0xcf                  /* iret */
   };
   uint8_t ivt[4] = {(uint8_t)offset, (uint8_t)(offset >> 8), (uint8_t)segment,
                     (uint8_t)(segment >> 8)};

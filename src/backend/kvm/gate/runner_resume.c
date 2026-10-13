@@ -103,7 +103,20 @@ int daze_kvm_runner_gate_frame_reply(DazeKvmMachine *machine, const DazeKvmRunne
   if (flags_address < sregs.ss.base || !range_valid(machine, flags_address, sizeof(uint16_t))) {
     return DAZE_KVM_RUNNER_GATE_RESUME_INVALID;
   }
-  regs.rax = replace_low16(regs.rax, daze_read_u16(reply));
+  const struct kvm_regs before = regs;
+  const uint8_t restoring_gate[] = {
+    0x50,                 /* push ax */
+    0xb0, frame->vector,  /* mov al,vector */
+    0xe6, DAZE_PORT_GATE, /* out 0xf4,al */
+    0x58,                 /* pop ax */
+    0xcf                  /* iret */
+  };
+  const uint64_t gate_address = sregs.cs.base + regs.rip - 3u;
+  const int restores_ax = regs.rip >= 3 && gate_address <= UINT32_MAX &&
+                          range_valid(machine, (uint32_t)gate_address, sizeof(restoring_gate)) &&
+                          memcmp((const uint8_t *)machine->guest + gate_address, restoring_gate,
+                                 sizeof(restoring_gate)) == 0;
+  regs.rax = restores_ax ? regs.rax : replace_low16(regs.rax, daze_read_u16(reply));
   regs.rbx = replace_low16(regs.rbx, daze_read_u16(reply + 2));
   regs.rcx = replace_low16(regs.rcx, daze_read_u16(reply + 4));
   regs.rdx = replace_low16(regs.rdx, daze_read_u16(reply + 6));
@@ -112,11 +125,13 @@ int daze_kvm_runner_gate_frame_reply(DazeKvmMachine *machine, const DazeKvmRunne
   const struct kvm_segment previous_es = sregs.es;
   real_data_segment(&sregs.es, daze_read_u16(reply + 12));
   const int es_changed = memcmp(&previous_es, &sregs.es, sizeof(previous_es)) != 0;
+  daze_write_u16((uint8_t *)machine->guest + flags_address - 6u, daze_read_u16(reply));
   daze_write_u16((uint8_t *)machine->guest + flags_address, daze_read_u16(reply + 14));
   /* Use raw SETs: downstream ioctl installs bypass pending sync writes, which the next
    * KVM_RUN could otherwise overwrite. */
   if ((es_changed && ioctl(machine->vcpu, KVM_SET_SREGS, &sregs) != 0) ||
-      ioctl(machine->vcpu, KVM_SET_REGS, &regs) != 0) {
+      ((!restores_ax || memcmp(&before, &regs, sizeof(regs)) != 0) &&
+       ioctl(machine->vcpu, KVM_SET_REGS, &regs) != 0)) {
     return DAZE_KVM_RUNNER_GATE_RESUME_FAILED;
   }
   if (machine->run_metrics != NULL) {
