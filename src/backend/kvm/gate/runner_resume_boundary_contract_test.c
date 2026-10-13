@@ -63,6 +63,65 @@ static void guest_ax_reply(void) {
         DAZE_KVM_RUNNER_GATE_RESUME_OK);
   CHECK(daze_read_u16(guest + 0x300) == 0xabcd && daze_read_u16(guest + 0x306) == 0x246);
   CHECK(memcmp(&run.s.regs.regs, &before, sizeof(before)) == 0 && run.kvm_dirty_regs == 0);
+  for (unsigned kind = 0; kind < 17; ++kind) {
+    real_data_segment(&run.s.regs.sregs.es, 0x40);
+    run.s.regs.sregs.es.dpl = 0;
+    run.s.regs.sregs.cr0 = kind == 2 ? 1 : 0;
+    run.s.regs.regs.rflags = kind == 3 ? 1u << 17 : 0;
+    switch (kind) {
+    case 1:
+      run.s.regs.sregs.es.dpl = 3;
+      break;
+    case 4:
+      run.s.regs.sregs.es.dpl = 1;
+      break;
+    case 5:
+      run.s.regs.sregs.es.dpl = 2;
+      break;
+    case 6:
+      run.s.regs.sregs.es.base++;
+      break;
+    case 7:
+      run.s.regs.sregs.es.limit++;
+      break;
+    case 8:
+      run.s.regs.sregs.es.selector++;
+      break;
+    case 9:
+      run.s.regs.sregs.es.type = 7;
+      break;
+    case 10:
+      run.s.regs.sregs.es.present = 0;
+      break;
+    case 11:
+      run.s.regs.sregs.es.db = 1;
+      break;
+    case 12:
+      run.s.regs.sregs.es.unusable = 1;
+      break;
+    case 13:
+      run.s.regs.sregs.es.g = 1;
+      break;
+    case 14:
+      run.s.regs.sregs.es.l = 1;
+      break;
+    case 15:
+      run.s.regs.sregs.es.avl = 1;
+      break;
+    case 16:
+      run.s.regs.sregs.es.s = 0;
+      break;
+    }
+    const struct kvm_sregs saved = run.s.regs.sregs;
+    const unsigned setters = set_sregs_calls;
+    CHECK(daze_kvm_runner_gate_frame_reply(&machine, &frame, reply) ==
+          (kind < 2 ? DAZE_KVM_RUNNER_GATE_RESUME_OK : DAZE_KVM_RUNNER_GATE_RESUME_FAILED));
+    CHECK(set_sregs_calls == setters + (kind >= 2));
+    CHECK(memcmp(&saved, &run.s.regs.sregs, sizeof(saved)) == 0 && run.kvm_dirty_regs == 0);
+  }
+  run.s.regs.regs = before;
+  run.s.regs.sregs.cr0 = 0;
+  real_data_segment(&run.s.regs.sregs.es, 0x40);
   daze_write_u16(reply + 2, 1);
   CHECK(daze_kvm_runner_gate_frame_reply(&machine, &frame, reply) ==
         DAZE_KVM_RUNNER_GATE_RESUME_FAILED);
