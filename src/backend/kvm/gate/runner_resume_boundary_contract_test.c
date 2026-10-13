@@ -34,6 +34,49 @@ static int counted_ioctl(int fd, unsigned long request, ...) {
   } while (0)
 
 #if defined(__linux__) && (defined(__x86_64__) || defined(__i386__))
+static void guest_ax_reply(void) {
+  uint8_t guest[0x2000] = {0}, reply[16] = {0};
+  struct kvm_run run = {0};
+  DazeKvmMachine machine = {.vcpu = INT_MAX,
+                            .guest = guest,
+                            .guest_size = sizeof(guest),
+                            .run = &run,
+                            .sync_regs_mask = KVM_SYNC_X86_REGS | KVM_SYNC_X86_SREGS};
+  run.s.regs.regs = (struct kvm_regs){.rip = 3, .rsp = 0x100, .rax = 0x12340021};
+  run.s.regs.sregs.cs.base = 0x1000;
+  run.s.regs.sregs.ss = (struct kvm_segment){.selector = 0x20, .base = 0x200};
+  real_data_segment(&run.s.regs.sregs.es, 0x40);
+  const uint8_t gate[] = {
+    0x50,       /* push ax */
+    0xb0, 0x21, /* mov al,21h */
+    0xe6, 0xf4, /* out f4h,al */
+    0x58,       /* pop ax */
+    0xcf,       /* iret */
+  };
+  memcpy(guest + 0x1000, gate, sizeof(gate));
+  const DazeKvmRunnerGateFrame frame = {.vector = 0x21, .ss = 0x20, .sp = 0x100};
+  daze_write_u16(reply, 0xabcd);
+  daze_write_u16(reply + 12, 0x40);
+  daze_write_u16(reply + 14, 0x246);
+  const struct kvm_regs before = run.s.regs.regs;
+  CHECK(daze_kvm_runner_gate_frame_reply(&machine, &frame, reply) ==
+        DAZE_KVM_RUNNER_GATE_RESUME_OK);
+  CHECK(daze_read_u16(guest + 0x300) == 0xabcd && daze_read_u16(guest + 0x306) == 0x246);
+  CHECK(memcmp(&run.s.regs.regs, &before, sizeof(before)) == 0 && run.kvm_dirty_regs == 0);
+  daze_write_u16(reply + 2, 1);
+  CHECK(daze_kvm_runner_gate_frame_reply(&machine, &frame, reply) ==
+        DAZE_KVM_RUNNER_GATE_RESUME_FAILED);
+  daze_write_u16(reply + 2, 0);
+  for (int kind = 0; kind < 4; ++kind) {
+    run.s.regs.regs.rip = kind == 0 ? 2 : 3;
+    run.s.regs.sregs.cs.base = kind == 1 ? UINT64_C(0x100000000) : 0x1000;
+    machine.guest_size = kind == 2 ? 0x1006 : sizeof(guest);
+    if (kind == 3) guest[0x1005] = 0x90;
+    CHECK(daze_kvm_runner_gate_frame_reply(&machine, &frame, reply) ==
+          DAZE_KVM_RUNNER_GATE_RESUME_FAILED);
+  }
+}
+
 static void rejected_inputs(void) {
   uint8_t guest[256] = {0}, reply[16] = {0};
   struct kvm_run run = {0};
@@ -180,7 +223,8 @@ static int cpu_boundaries(void) {
         regs.rcx == UINT64_C(0x323456781102) && regs.rdx == UINT64_C(0x423456781103) &&
         regs.rsi == UINT64_C(0x523456781104) && regs.rdi == UINT64_C(0x623456781105));
   CHECK(sregs.es.selector == 0x1106 && sregs.es.base == 0x11060 && sregs.es.limit == 0xffff);
-  CHECK(memcmp(guest + 0x2100, saved, 6) == 0 && daze_read_u16(guest + 0x2106) == 0x1107);
+  CHECK(daze_read_u16(guest + 0x2100) == 0x1100 && memcmp(guest + 0x2102, saved + 2, 4) == 0 &&
+        daze_read_u16(guest + 0x2106) == 0x1107);
   CHECK(metrics.kvm_gate_frame_reply_calls == 1);
   metrics.enabled = 0;
   CHECK(daze_kvm_machine_sync_refresh(&machine) == DAZE_KVM_MACHINE_OK);
@@ -243,6 +287,7 @@ static int cpu_boundaries(void) {
 int main(int argc, char **argv) {
   if (argc == 2 && strcmp(argv[1], "--kvm") == 0) return cpu_boundaries();
   rejected_inputs();
+  guest_ax_reply();
   puts("runner resume boundary: passed");
   return 0;
 }

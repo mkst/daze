@@ -42,9 +42,6 @@ int daze_kvm_command_owner_reply_exec_success(DazeKvmMachine *machine) {
   const int capture = daze_kvm_runner_gate_frame_capture(machine, DAZE_INT_DOS, &frame);
   if (capture != DAZE_KVM_RUNNER_GATE_RESUME_OK) return capture;
   if (frame.ax != 0x4b00) return DAZE_KVM_RUNNER_GATE_RESUME_INVALID;
-  /* The gate discards its saved AX before IRET. Supply the successful EXEC
-   * return while preserving every other reply register from its captured
-   * frame, and change only CF in the already-pushed FLAGS word. */
   daze_write_u16(reply, 0);
   daze_write_u16(reply + 2, frame.bx);
   daze_write_u16(reply + 4, frame.cx);
