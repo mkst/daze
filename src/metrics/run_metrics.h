@@ -112,6 +112,7 @@ typedef struct {
   uint64_t kvm_dpmi_mediator_capture_elisions;
   uint64_t kvm_dpmi_debug_update_calls;
   uint64_t kvm_dpmi_debug_update_nanoseconds;
+  uint64_t kvm_guest_virtual_interrupt_calls[2];
   /* DPMI 0301h uses a real-mode callback detour with its own KVM_RUN. These
    * are separate from the protected-mode DPMI entry helpers above. */
   uint64_t kvm_rm_procedure_calls;

@@ -219,6 +219,8 @@ int main(void) {
       config.protected_gate.default_dos_stub_address != 0xfde9c8 ||
       config.protected_gate.record_address != 0xfdea00 ||
       config.protected_gate.mailbox_address != 0xfdea40 ||
+      config.protected_gate.virtual_control_address != 0xfdea2c ||
+      config.protected_gate.virtual_handler_address != 0xfded00 ||
       config.state_save_gate.handler_address != 0xfdea80 ||
       config.raw_switch_gate.handler_address != 0xfdeaa0 ||
       config.raw_switch_gate.real_handler_address != 0x2300 ||
@@ -278,7 +280,7 @@ int main(void) {
     return 1;
   }
   invalid = normal_input();
-  invalid.reserved_ranges = &(DazeKvmGuestRange){0xfde800, 0x420};
+  invalid.reserved_ranges = &(DazeKvmGuestRange){0xfded20, 0x20};
   invalid.reserved_range_count = 1;
   if (daze_kvm_normal_transition_config_build(&invalid, &unchanged, NULL)) {
     fprintf(stderr, "runner-reserved gate collision was accepted\n");

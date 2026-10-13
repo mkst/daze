@@ -246,6 +246,7 @@ static void reporting(void) {
       "setup=1.000ms reflect=6.000ms cleanup=1.000ms resume=2.000ms "
       "reflect-KVM_RUN=4.000ms resume-KVM_RUN=1.500ms dos-service=0.500ms");
   lacks("kvm-rm-procedure-cost time-2ch");
+  lacks("kvm-guest-virtual-interrupts");
   has("kvm-rm-procedure total=1/10.000ms/10000.0us KVM_RUN=0/0.000ms/0.0us");
   has("transition=0.000ms other=5.000ms");
   lacks("debug-arm=");
@@ -255,6 +256,8 @@ static void reporting(void) {
   has("kvm-dpmi-functions 0501h=2/3.000ms overflow=4\n");
   has("kvm-virtual-interrupt-sites 0900h@0028:1234=3 overflow=5\n");
   run.kvm_rm_procedure_run_calls = 1;
+  run.kvm_guest_virtual_interrupt_calls[0] = 3;
+  run.kvm_guest_virtual_interrupt_calls[1] = 4;
   run.kvm_rm_procedure_run_nanoseconds = 2000000;
   run.kvm_rm_procedure_setup_nanoseconds = 500000;
   run.kvm_rm_procedure_resume_nanoseconds = 500000;
@@ -263,6 +266,10 @@ static void reporting(void) {
   run.kvm_rm_procedure_reflect_vectors[0] = (DazeRunMetricsRmReflectVector){0x21, 2, 3000000};
   capture(1, NULL, &run, NULL);
   has("KVM_RUN=1/2.000ms/2000.0us");
+  has("kvm-guest-virtual-interrupts 0900h=3 0901h=4");
+  run.kvm_guest_virtual_interrupt_calls[0] = 0;
+  capture(1, NULL, &run, NULL);
+  has("kvm-guest-virtual-interrupts 0900h=0 0901h=4");
   has("transition=0.000ms other=0.000ms");
   has("kvm-rm-procedure-resume KVM_RUN=0.000ms capture=1.000ms other=0.000ms");
   has("kvm-rm-procedure-reflect KVM_RUN=2.000ms runner-service=1/1.000ms other=0.000ms");

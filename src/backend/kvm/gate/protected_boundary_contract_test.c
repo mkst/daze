@@ -131,6 +131,102 @@ static void artifact_contract(void) {
   assert(daze_kvm_protected_gate_build(&valid, &output));
 }
 
+static void virtual_interrupt_contract(void) {
+  DazeKvmProtectedGateLayout layout = gate_layout();
+  layout.virtual_handler_address = 0x2800;
+  layout.virtual_control_address = 0x2600;
+  layout.legacy_np_capture_address = 0x2900;
+  DazeKvmProtectedGateArtifacts output;
+  assert(daze_kvm_protected_gate_build(&layout, &output));
+  assert(output.virtual_control[0] == 1 &&
+         output.virtual_handler_size <= sizeof(output.virtual_handler));
+  const uint32_t occupied[] = {layout.idt_address,
+                               layout.handler_address,
+                               layout.dos_handler_address,
+                               layout.default_dos_stub_address,
+                               layout.record_address,
+                               layout.mailbox_address,
+                               layout.legacy_np_capture_address,
+                               layout.virtual_handler_address};
+  for (size_t i = 0; i < sizeof(occupied) / sizeof(occupied[0]); i++) {
+    DazeKvmProtectedGateLayout bad = layout;
+    bad.virtual_control_address = occupied[i];
+    const DazeKvmProtectedGateArtifacts before = output;
+    assert(!daze_kvm_protected_gate_build(&bad, &output));
+    assert(memcmp(&before, &output, sizeof(output)) == 0);
+    if (i < 7) {
+      bad = layout;
+      bad.virtual_handler_address = occupied[i];
+      assert(!daze_kvm_protected_gate_build(&bad, &output));
+    }
+  }
+  for (unsigned i = 0; i < 5; i++) {
+    DazeKvmProtectedGateLayout bad = layout;
+    if (i == 0) bad.virtual_handler_address = 0;
+    if (i == 1) bad.virtual_control_address = 0;
+    if (i == 2) bad.virtual_handler_address = UINT32_MAX;
+    if (i == 3) bad.virtual_control_address = UINT32_MAX;
+    if (i == 4) bad.record_address = bad.handler_address + DAZE_KVM_PROTECTED_GATE_HANDLER_MAX_SIZE;
+    assert(!daze_kvm_protected_gate_build(&bad, &output));
+  }
+  layout.dos_handler_address = layout.legacy_np_capture_address = 0;
+  assert(daze_kvm_protected_gate_build(&layout, &output));
+  uint8_t guest[0x4000] = {0};
+  DazeRunMetrics metrics = {.enabled = 1};
+  DazeKvmMachine machine = {.guest = guest, .guest_size = sizeof(guest), .run_metrics = &metrics};
+  int enabled = 1;
+  assert(!daze_kvm_protected_gate_sync_virtual_interrupts(NULL, &layout, &enabled));
+  assert(!daze_kvm_protected_gate_sync_virtual_interrupts(&machine, NULL, &enabled));
+  assert(!daze_kvm_protected_gate_sync_virtual_interrupts(&machine, &layout, NULL));
+  for (unsigned i = 0; i < 5; i++) {
+    DazeKvmMachine bad = machine;
+    DazeKvmProtectedGateLayout bad_layout = layout;
+    if (i == 0) bad.guest = NULL;
+    if (i == 1) bad.guest_size = layout.virtual_control_address;
+    if (i == 2) bad_layout.virtual_handler_address = 0;
+    if (i == 3) bad_layout.virtual_control_address = 0;
+    if (i == 4) guest[layout.virtual_control_address] = 2;
+    assert(!daze_kvm_protected_gate_sync_virtual_interrupts(&bad, &bad_layout, &enabled));
+  }
+  uint8_t *control = guest + layout.virtual_control_address;
+  control[0] = 0;
+  daze_write_u32(control + 4, 3);
+  daze_write_u32(control + 8, 1);
+  daze_write_u32(control + 12, 4);
+  assert(daze_kvm_protected_gate_sync_virtual_interrupts(&machine, &layout, &enabled));
+  assert(enabled == 0 && metrics.kvm_guest_virtual_interrupt_calls[0] == UINT64_C(0x100000003) &&
+         metrics.kvm_guest_virtual_interrupt_calls[1] == 4 && daze_read_u32(control + 4) == 0);
+  assert(daze_kvm_protected_gate_sync_virtual_interrupts(&machine, &layout, &enabled));
+  assert(metrics.kvm_guest_virtual_interrupt_calls[1] == 4);
+  metrics.enabled = 0;
+  control[0] = 1;
+  daze_write_u32(control + 4, 2);
+  assert(daze_kvm_protected_gate_sync_virtual_interrupts(&machine, &layout, &enabled));
+  assert(enabled == 1 && metrics.kvm_guest_virtual_interrupt_calls[1] == 4);
+  machine.run_metrics = NULL;
+  assert(daze_kvm_protected_gate_sync_virtual_interrupts(&machine, &layout, &enabled));
+  control[0] = 2;
+  DazeKvmDpmiMediator mediator = {
+    .guest = guest, .guest_size = sizeof(guest), .virtual_interrupts_enabled = &enabled};
+  DazeKvmDpmiEntryResult boundary = {.observation = {.kind = DAZE_KVM_DPMI_ENTRY_EXIT_PIO,
+                                                     .pio_direction = DAZE_KVM_DPMI_ENTRY_PIO_OUT,
+                                                     .pio_size = 1,
+                                                     .pio_count = 1,
+                                                     .pio_port = DAZE_KVM_DPMI_MEDIATOR_PORT,
+                                                     .pio_value_present = 1,
+                                                     .pio_value = DAZE_KVM_DPMI_MEDIATOR_MARKER}};
+  DazeKvmProtectedGateExchange exchange;
+  assert(!process_mediator_boundary_impl(&machine, &mediator, &layout, &boundary, &exchange));
+  DazeKvmProtectedGateResult result;
+  assert(run_from_boundary(&machine, &mediator, &layout, &boundary, &result) ==
+         DAZE_KVM_PROTECTED_GATE_INVALID);
+  layout.exchange_limit = 0;
+  assert(run_from_boundary(&machine, &mediator, &layout, &boundary, &result) ==
+         DAZE_KVM_PROTECTED_GATE_INVALID);
+  layout.virtual_handler_address = layout.virtual_control_address = 0;
+  assert(daze_kvm_protected_gate_sync_virtual_interrupts(&machine, &layout, NULL));
+}
+
 static void projection_contract(void) {
   uint8_t guest[0x4000] = {0};
   DazeKvmMachine machine = {.guest = guest, .guest_size = sizeof(guest), .vcpu = -1};
@@ -333,6 +429,7 @@ static void boundary_contract(void) {
 }
 
 int main(void) {
+  virtual_interrupt_contract();
   artifact_contract();
   projection_contract();
   metrics_contract();
