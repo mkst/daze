@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <dirent.h>
+#include <sys/types.h>
 
 enum {
   DAZE_DOSFS_PATH_MAX = 4096,
@@ -45,6 +46,9 @@ int daze_dosfs_mount_is_readonly(const DazeDosfsMounts *mounts, int drive_index)
 
 typedef struct {
   int host_fds[DAZE_DOSFS_MAX_HANDLES];
+  struct DazeDosfsWriteBuffer *write_buffers[DAZE_DOSFS_MAX_HANDLES];
+  int buffered_writes;
+  int teardown_errno;
 } DazeDosfsHandles;
 
 typedef struct {
@@ -123,6 +127,12 @@ DazeDosfsStatus daze_dosfs_handles_force_duplicate(DazeDosfsHandles *handles,
                                                    int *host_errno);
 DazeDosfsStatus daze_dosfs_handles_get(const DazeDosfsHandles *handles, uint16_t dos_handle,
                                        int *host_fd);
+/* Raw descriptor access is for writes that must retain pending buffered data. */
+DazeDosfsStatus daze_dosfs_handles_peek(const DazeDosfsHandles *handles, uint16_t dos_handle,
+                                        int *host_fd);
+DazeDosfsStatus daze_dosfs_handles_flush(const DazeDosfsHandles *handles, int *host_errno);
+ssize_t daze_dosfs_handles_write(DazeDosfsHandles *handles, uint16_t dos_handle,
+                                 const uint8_t *bytes, size_t count);
 DazeDosfsStatus daze_dosfs_handles_close(DazeDosfsHandles *handles, uint16_t dos_handle,
                                          int *host_errno);
 void daze_dosfs_handles_close_all(DazeDosfsHandles *handles);
