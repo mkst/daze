@@ -116,6 +116,7 @@ typedef struct {
   /* DPMI 0301h uses a real-mode callback detour with its own KVM_RUN. These
    * are separate from the protected-mode DPMI entry helpers above. */
   uint64_t kvm_rm_procedure_calls;
+  uint64_t kvm_rm_procedure_bridged_calls;
   uint64_t kvm_rm_procedure_nanoseconds;
   uint64_t kvm_rm_procedure_run_calls;
   uint64_t kvm_rm_procedure_run_nanoseconds;

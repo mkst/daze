@@ -598,6 +598,14 @@ int daze_kvm_dpmi_entry_continue_mediator_or_capture(DazeKvmMachine *machine,
     result->observation.run_error = errno;
     return DAZE_KVM_DPMI_ENTRY_FAILED;
   }
+  return daze_kvm_dpmi_entry_observe_mediator_or_capture(machine, result);
+}
+
+int daze_kvm_dpmi_entry_observe_mediator_or_capture(DazeKvmMachine *machine,
+                                                    DazeKvmDpmiEntryResult *result) {
+  if (result != NULL) *result = (DazeKvmDpmiEntryResult){0};
+  if (machine == NULL || machine->vcpu < 0 || machine->run == NULL || result == NULL)
+    return DAZE_KVM_DPMI_ENTRY_INVALID;
   observe_continuation_exit(machine, (const struct kvm_run *)machine->run, &result->observation);
   if (mediator_pio(result)) {
     if (machine->run_metrics != NULL && machine->run_metrics->enabled)
@@ -733,6 +741,13 @@ int daze_kvm_dpmi_entry_continue_once(DazeKvmMachine *machine, DazeKvmDpmiEntryR
 
 int daze_kvm_dpmi_entry_continue_mediator_or_capture(DazeKvmMachine *machine,
                                                      DazeKvmDpmiEntryResult *result) {
+  (void)machine;
+  if (result != NULL) *result = (DazeKvmDpmiEntryResult){0};
+  return DAZE_KVM_DPMI_ENTRY_UNAVAILABLE;
+}
+
+int daze_kvm_dpmi_entry_observe_mediator_or_capture(DazeKvmMachine *machine,
+                                                    DazeKvmDpmiEntryResult *result) {
   (void)machine;
   if (result != NULL) *result = (DazeKvmDpmiEntryResult){0};
   return DAZE_KVM_DPMI_ENTRY_UNAVAILABLE;

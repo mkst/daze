@@ -87,6 +87,10 @@ int daze_kvm_dpmi_entry_continue_once(DazeKvmMachine *machine, DazeKvmDpmiEntryR
 int daze_kvm_dpmi_entry_continue_mediator_or_capture(DazeKvmMachine *machine,
                                                      DazeKvmDpmiEntryResult *result);
 
+/* Observe an already completed KVM_RUN with the same mediator capture policy. */
+int daze_kvm_dpmi_entry_observe_mediator_or_capture(DazeKvmMachine *machine,
+                                                    DazeKvmDpmiEntryResult *result);
+
 /* One KVM_RUN with exit observation only. Register/segment fields remain
  * unfilled until capture_state is called while parked at that same boundary. */
 int daze_kvm_dpmi_entry_continue_observe(DazeKvmMachine *machine, DazeKvmDpmiEntryResult *result);

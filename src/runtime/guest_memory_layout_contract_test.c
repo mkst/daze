@@ -55,8 +55,10 @@ int main(void) {
 
   DazeGuestLayout stable;
   check(daze_guest_layout_init(&stable) && daze_guest_layout_add_stable(&stable) &&
-          stable.count == 10,
-        "stable set holds ten ranges", &pass);
+          stable.count == DAZE_GUEST_LAYOUT_STABLE_COUNT,
+        "stable range count", &pass);
+  check(daze_guest_owner_persistent(DAZE_GUEST_OWNER_KVM_RM_RETURN_BRIDGE),
+        "callback return bridge is persistent", &pass);
   check(daze_guest_layout_validate_ranges(stable.ranges, stable.count, (uint32_t)k_memory_size,
                                           &failure),
         "stable set is internally consistent", &pass);
@@ -172,7 +174,7 @@ int main(void) {
           daze_guest_layout_add_dpmi_client_arena(&assembled, 0x50000, k_dpmi_linear_arena_limit) &&
           daze_guest_layout_add_conventional_allocator(&assembled, 0x3000) &&
           daze_guest_layout_add_kvm_runner(&assembled, (uint32_t)k_memory_size) &&
-          assembled.count == 17,
+          assembled.count == DAZE_GUEST_LAYOUT_STABLE_COUNT + 7,
         "launch plus runner ranges share one layout", &pass);
 
   /* One range renders as "owner [aaaaaaaa..bbbbbbbb)" with both ends shown.
@@ -203,7 +205,7 @@ int main(void) {
   DazeGuestLaunchFailure build_failure = {
     DAZE_GUEST_LAUNCH_VALID, {0, 0, DAZE_GUEST_OWNER_NONE}, {0, 0, DAZE_GUEST_OWNER_NONE}};
   check(daze_guest_layout_build_launch(&built, &good, k_valid_allocation_start, &build_failure) &&
-          built.count == 10 + 4,
+          built.count == DAZE_GUEST_LAYOUT_STABLE_COUNT + 4,
         "launch builder assembles the stable set plus per-run ranges", &pass);
   DazeGuestLaunchInput bad_arena = valid_input();
   bad_arena.image_size = k_dpmi_linear_arena_limit - bad_arena.image_address;
