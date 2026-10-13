@@ -692,8 +692,9 @@ static int retire_mediator_out(DazeKvmMachine *machine, uint32_t cs_base, uint32
     /* The validated two-byte OUT writes a dummy port; advancing RIP retires it without
      * executing guest code or changing other state. */
     parked_regs.rip = (uint64_t)rip + 2;
-    return ioctl(machine->vcpu, KVM_SET_REGS, &parked_regs) == 0 ? DAZE_KVM_DPMI_ENTRY_OK
-                                                                 : DAZE_KVM_DPMI_ENTRY_FAILED;
+    return daze_kvm_machine_set_regs(machine, &parked_regs) == DAZE_KVM_MACHINE_OK
+             ? DAZE_KVM_DPMI_ENTRY_OK
+             : DAZE_KVM_DPMI_ENTRY_FAILED;
   }
   if (continue_to_linear(machine, (uint32_t)successor, result, capture) != DAZE_KVM_DPMI_ENTRY_OK)
     return DAZE_KVM_DPMI_ENTRY_FAILED;
