@@ -245,6 +245,7 @@ int daze_kvm_normal_transition_config_build(const DazeKvmNormalTransitionConfigI
     .legacy_np_capture_address = k_gate_base + 0x400,
     .virtual_handler_address = k_gate_base + 0x500,
     .virtual_control_address = k_protected_record + DAZE_KVM_DPMI_RECORD_SIZE,
+    .rm_entry_address = k_dpmi_rm_entry_linear,
   };
   candidate.state_save_gate = (DazeKvmStateSaveGateLayout){k_idt_address, k_state_save_handler,
                                                            k_idt_limit, k_gate_code_selector};

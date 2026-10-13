@@ -311,6 +311,11 @@ void daze_metrics_report_run(const DazeRunMetrics *metrics) {
                 (double)metrics->kvm_rm_procedure_reflect_nanoseconds / 1000000.0,
                 (double)metrics->kvm_rm_procedure_cleanup_nanoseconds / 1000000.0,
                 (double)metrics->kvm_rm_procedure_resume_nanoseconds / 1000000.0);
+        if (metrics->kvm_rm_procedure_native_calls != 0)
+          fprintf(stderr,
+                  "metrics: kvm-rm-procedure-native=%" PRIu64
+                  " (host detour timings may include multiple guest callbacks)\n",
+                  metrics->kvm_rm_procedure_native_calls);
         if (metrics->kvm_rm_procedure_bridged_calls != 0)
           fprintf(stderr,
                   "metrics: kvm-rm-procedure-bridged=%" PRIu64

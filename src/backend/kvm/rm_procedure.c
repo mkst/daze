@@ -17,11 +17,30 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "rm_entry_code.h"
+#include "rm_entry.h"
+
+int daze_kvm_rm_entry_install(DazeKvmMachine *machine, uint32_t epilogue) {
+  if (epilogue == 0) return 1;
+  _Static_assert(sizeof(native_entry_code) <= DAZE_KVM_RM_ENTRY_CONTROL - DAZE_KVM_RM_ENTRY_LINEAR,
+                 "entry code stays below control state");
+  _Static_assert(sizeof(native_low_code) <= 0x2a00 - DAZE_KVM_RM_ENTRY_LOW_LINEAR,
+                 "low entry code stays below parked state");
+  uint8_t control[DAZE_KVM_RM_ENTRY_CONTROL_SIZE] = {0};
+  daze_write_u32(control + 0x30, epilogue);
+  daze_write_u32(control + 0x68, DAZE_KVM_RM_ENTRY_SIGNATURE);
+  return daze_kvm_machine_write(machine, DAZE_KVM_RM_ENTRY_LINEAR, native_entry_code,
+                                sizeof(native_entry_code)) &&
+         daze_kvm_machine_write(machine, DAZE_KVM_RM_ENTRY_LOW_LINEAR, native_low_code,
+                                sizeof(native_low_code)) &&
+         daze_kvm_machine_write(machine, DAZE_KVM_RM_ENTRY_CONTROL, control, sizeof(control));
+}
 
 #if defined(__linux__) && (defined(__x86_64__) || defined(__i386__))
 #include <linux/kvm.h>
 #include <sys/ioctl.h>
 #include "rm_return_code.h"
+#include "descriptor.h"
 
 static void dump_rejected_far_load(DazeKvmMachine *machine, const struct kvm_regs *uregs);
 
@@ -46,6 +65,57 @@ typedef struct {
 } ParkedState;
 
 static struct kvm_segment protected_code_segment(uint16_t selector, uint32_t base);
+static int return_bridge_eligible(const DazeKvmMachine *machine, const ParkedState *parked,
+                                  uint32_t frame_address);
+
+static void native_arm(DazeKvmMachine *machine, const ParkedState *parked, uint32_t frame_address) {
+  if (!daze_kvm_rm_entry_installed(machine)) return;
+  const struct kvm_sregs *s = &parked->sregs;
+  uint8_t *guest = machine->guest;
+  if (daze_read_u32(guest + 0x5830) == 0) return;
+  daze_write_u32(guest + 0x5800, 0);
+  if (s->cs.base != 0 || !s->cs.db || s->gdt.base != k_dpmi_gdt_address || s->gdt.limit != 0xffff ||
+      s->ldt.base != k_dpmi_ldt_address || s->ldt.limit != 0xffff ||
+      s->ss.selector != DAZE_SEL_DATA || s->ss.db || s->ss.limit != 0xffff ||
+      s->ds.selector != DAZE_SEL_DATA || s->es.selector != DAZE_SEL_DATA ||
+      s->fs.selector != DAZE_SEL_GATE_DATA || (s->gs.selector == 0 && !s->gs.unusable) ||
+      memcmp(&s->ss, &s->ds, sizeof(s->ss)) || memcmp(&s->ss, &s->es, sizeof(s->ss)) ||
+      daze_read_u16(guest + 0xfdea20) != DAZE_SEL_CODE ||
+      (guest[k_dpmi_gdt_address + DAZE_SEL_CODE + 6] & 0x40) ||
+      !return_bridge_eligible(machine, parked, frame_address))
+    return;
+  if (!daze_read_u32(guest + 0x5850)) {
+    for (size_t i = DAZE_SEL_RM_SS; i <= DAZE_SEL_RM_STACK + 7; ++i)
+      if (guest[k_dpmi_gdt_address + i]) return;
+    daze_write_u32(guest + 0x5850, 1);
+  }
+  /* Real-mode loads retain cached attributes: establish 16-bit writable caches first. */
+  for (unsigned sel = DAZE_SEL_RM_SS; sel <= DAZE_SEL_RM_GS; sel += 8)
+    daze_dpmi_descriptor_encode(guest + k_dpmi_gdt_address + sel, 0, 0xffff, 0x93, 0);
+  daze_dpmi_descriptor_encode(guest + k_dpmi_gdt_address + DAZE_SEL_RM_STACK,
+                              k_dpmi_rm_return_bridge, 0xffff, 0x93, 0);
+  daze_write_u32(guest + 0x5804, (uint32_t)s->es.base);
+  const unsigned selectors[] = {DAZE_SEL_DATA, DAZE_SEL_CODE, DAZE_SEL_GATE, DAZE_SEL_GATE_CODE,
+                                DAZE_SEL_GATE_DATA};
+  for (size_t i = 0; i < 5; i++)
+    memcpy(guest + 0x5808 + i * 8, guest + k_dpmi_gdt_address + selectors[i], 8);
+  daze_write_u16(guest + 0x5834, s->gs.selector);
+  if (s->gs.selector != 0) {
+    const uint32_t descriptor =
+      (uint32_t)((s->gs.selector & 4) ? s->ldt.base : s->gdt.base) + (s->gs.selector & ~7u);
+    daze_write_u32(guest + 0x5838, descriptor);
+    memcpy(guest + 0x5848, guest + descriptor, 8);
+  }
+  _Static_assert(sizeof(*s) <= DAZE_KVM_RM_ENTRY_CONTROL_SIZE - 0x100, "saved segment state fits");
+  memcpy(guest + DAZE_KVM_RM_ENTRY_CONTROL + 0x100, s, sizeof(*s));
+  daze_write_u16(guest + 0x5854, s->gdt.limit);
+  daze_write_u32(guest + 0x5856, (uint32_t)s->gdt.base);
+  daze_write_u16(guest + 0x585a, s->ldt.selector);
+  daze_write_u16(guest + 0x585c, s->idt.limit);
+  daze_write_u32(guest + 0x585e, (uint32_t)s->idt.base);
+  daze_write_u32(guest + 0x5864, (uint32_t)s->cr0);
+  daze_write_u32(guest + 0x5800, 1);
+}
 
 static int reloadable_segment(const DazeKvmMachine *machine, const struct kvm_sregs *sregs,
                               const struct kvm_segment *segment) {
@@ -532,12 +602,20 @@ static int returned_to_gate(const struct kvm_regs *regs, const struct kvm_sregs 
 
 static int reflect_run(DazeKvmMachine *machine, DazeDosfsFileService *files,
                        DazeDosProcessState *process_state, const DazeKvmDpmiMediator *mediator,
-                       uint16_t dpmi_entry_segment, int bridge, DazeKvmDpmiEntryResult *successor) {
+                       uint16_t dpmi_entry_segment, int bridge, DazeKvmDpmiEntryResult *successor,
+                       int observed_first) {
   const struct kvm_run *run = (const struct kvm_run *)machine->run;
+  uint32_t callback = daze_kvm_rm_entry_count(machine);
   for (size_t step = 0; step < RM_MAX_STEPS; ++step) {
-    if (timed_rm_kvm_run(machine) < 0) {
+    if (!observed_first && timed_rm_kvm_run(machine) < 0) {
       fprintf(stderr, "kvm-rm-procedure: run failed\n");
       return RMRUN_STOP;
+    }
+    observed_first = 0;
+    const uint32_t next_callback = daze_kvm_rm_entry_count(machine);
+    if (next_callback != callback) {
+      callback = next_callback;
+      step = 0;
     }
     if (bridge &&
         daze_read_u16((const uint8_t *)machine->guest + k_dpmi_rm_return_bridge + 0x642) == 1) {
@@ -603,6 +681,7 @@ static int reflect_run(DazeKvmMachine *machine, DazeDosfsFileService *files,
             return RMRUN_STOP;
           }
           if (bridge && *value == 0x31) {
+            daze_kvm_rm_entry_invalidate(machine);
             /* A real-mode DPMI call may change descriptors used by the parked caches. */
             const uint8_t halt = 0xf4; /* hlt */
             if (!daze_kvm_machine_write(machine, DAZE_DPMI_RM_GATE_LINEAR, &halt, 1))
@@ -679,7 +758,63 @@ static void dump_rejected_far_load(DazeKvmMachine *machine, const struct kvm_reg
   }
   fprintf(stderr, "\n");
 }
+
+static int native_parked(DazeKvmMachine *machine, ParkedState *parked) {
+  if (!daze_kvm_range_fits(machine->guest_size, DAZE_KVM_RM_ENTRY_CONTROL,
+                           DAZE_KVM_RM_ENTRY_CONTROL_SIZE))
+    return 0;
+  const uint8_t *guest = machine->guest;
+  memcpy(&parked->sregs, guest + DAZE_KVM_RM_ENTRY_CONTROL + 0x100, sizeof(parked->sregs));
+  if (daze_kvm_machine_get_regs(machine, &parked->regs) != DAZE_KVM_MACHINE_OK) return 0;
+  const uint8_t *p = guest + 0x2a00;
+  parked->regs.rax = daze_read_u32(p);
+  parked->regs.rbx = daze_read_u32(p + 4);
+  parked->regs.rcx = daze_read_u32(p + 8);
+  parked->regs.rdx = daze_read_u32(p + 12);
+  parked->regs.rsi = daze_read_u32(p + 16);
+  parked->regs.rdi = daze_read_u32(p + 20);
+  parked->regs.rbp = daze_read_u32(p + 24);
+  parked->regs.rsp = daze_read_u32(p + 28);
+  parked->regs.rflags = daze_read_u32(p + 32);
+  parked->regs.rip = daze_read_u32(p + 0x3c);
+  parked->sregs.cr0 = daze_read_u32(p + 0x24);
+  return 1;
+}
+
+static int native_host_return(DazeKvmMachine *machine, DazeKvmDpmiEntryResult *successor) {
+  ParkedState parked;
+  struct kvm_sregs returned;
+  const uint32_t frame = daze_read_u32((const uint8_t *)machine->guest + 0x2a28);
+  if (!native_parked(machine, &parked) ||
+      !daze_kvm_range_fits(machine->guest_size, frame, DAZE_DPMI_RM_FRAME_SIZE) ||
+      !write_back_frame(machine, frame, &returned) ||
+      prepare_protected_return(machine, &parked, &returned) < 0 ||
+      daze_kvm_machine_set_sregs(machine, &parked.sregs) != DAZE_KVM_MACHINE_OK ||
+      daze_kvm_machine_set_regs(machine, &parked.regs) != DAZE_KVM_MACHINE_OK)
+    return 0;
+  daze_write_u32((uint8_t *)machine->guest + 0x5840, 0);
+  return daze_kvm_dpmi_entry_continue_mediator_or_capture(machine, successor) ==
+         DAZE_KVM_DPMI_ENTRY_OK;
+}
 #endif
+
+int daze_kvm_rm_entry_continue(const DazeKvmRmProcedureInput *input,
+                               DazeKvmDpmiEntryResult *successor) {
+#if defined(__linux__) && (defined(__x86_64__) || defined(__i386__))
+  if (input == NULL || successor == NULL || input->mediator == NULL || input->files == NULL ||
+      input->process_state == NULL || !daze_kvm_rm_entry_active(input->machine) ||
+      input->machine->run == NULL || input->machine->vcpu < 0)
+    return 0;
+  const int status = reflect_run(input->machine, input->files, input->process_state,
+                                 input->mediator, input->dpmi_entry_segment, 1, successor, 1);
+  if (status == RMRUN_BRIDGED) return 1;
+  return status == RMRUN_COMPLETE && native_host_return(input->machine, successor);
+#else
+  (void)input;
+  (void)successor;
+  return 0;
+#endif
+}
 
 int daze_kvm_rm_procedure_reflect(const DazeKvmRmProcedureInput *input,
                                   DazeKvmDpmiEntryResult *successor) {
@@ -694,6 +829,14 @@ int daze_kvm_rm_procedure_reflect(const DazeKvmRmProcedureInput *input,
   DazeRunMetrics *const metrics = machine->run_metrics;
   const uint64_t started = metrics != NULL && metrics->enabled ? monotonic_nanoseconds() : 0;
   const DazeDpmiRmProcedure *const rm = &input->mediator->rm_procedure;
+  if (daze_kvm_rm_entry_installed(machine) &&
+      (daze_guest_ranges_overlap(rm->frame_address, DAZE_DPMI_RM_FRAME_SIZE, k_dpmi_rm_entry_linear,
+                                 k_dpmi_rm_entry_size) ||
+       daze_guest_ranges_overlap(rm->stack_address, 4 + rm->parameter_bytes, k_dpmi_rm_entry_linear,
+                                 k_dpmi_rm_entry_size))) {
+    fprintf(stderr, "kvm-rm-procedure: frame or stack overlaps private callback entry\n");
+    return 0;
+  }
   uint64_t runner_calls_before = 0, date_calls_before = 0, time_calls_before = 0;
   uint64_t reflect_run_before = 0, service_before = 0;
   if (metrics != NULL && metrics->enabled) {
@@ -784,12 +927,18 @@ int daze_kvm_rm_procedure_reflect(const DazeKvmRmProcedureInput *input,
       ? install_return_bridge(machine, &post_pio, rm->frame_address)
       : 0;
   if (bridge < 0) return 0;
+  if (daze_kvm_rm_entry_installed(machine)) {
+    daze_kvm_rm_entry_invalidate(machine);
+    daze_write_u32((uint8_t *)machine->guest + 0x5840, 0);
+    if (bridge == 1 && input->protected_return_linear == 0)
+      native_arm(machine, &post_pio, rm->frame_address);
+  }
   const uint64_t transition_finished =
     metrics != NULL && metrics->enabled ? monotonic_nanoseconds() : 0;
   const uint64_t reflect_started =
     metrics != NULL && metrics->enabled ? monotonic_nanoseconds() : 0;
   const int status = reflect_run(machine, input->files, input->process_state, input->mediator,
-                                 input->dpmi_entry_segment, bridge, successor);
+                                 input->dpmi_entry_segment, bridge, successor, 0);
   const uint64_t reflect_finished =
     metrics != NULL && metrics->enabled ? monotonic_nanoseconds() : 0;
   const uint64_t resume_run_before =
@@ -802,7 +951,9 @@ int daze_kvm_rm_procedure_reflect(const DazeKvmRmProcedureInput *input,
       : 0;
   uint64_t resume_started = reflect_finished;
   int resumed = status == RMRUN_BRIDGED;
-  if (!resumed) {
+  if (status == RMRUN_COMPLETE && daze_kvm_rm_entry_active(machine)) {
+    resumed = native_host_return(machine, successor);
+  } else if (!resumed) {
     int completed = 0;
     struct kvm_sregs returned;
     if (status == RMRUN_COMPLETE)
