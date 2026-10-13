@@ -401,7 +401,7 @@ static DazeDosInt21DispatchStatus dispatch_file_transfer(const DazeDosInt21Conte
     }
   } else {
     int host_fd = -1;
-    if (daze_dosfs_handles_get(context->files->handles, request->bx, &host_fd) != DAZE_DOSFS_OK) {
+    if (daze_dosfs_handles_peek(context->files->handles, request->bx, &host_fd) != DAZE_DOSFS_OK) {
       file.dos_error = DAZE_DOS_ERR_INVALID_HANDLE;
       goto reply;
     }
@@ -664,6 +664,21 @@ DazeDosInt21DispatchStatus daze_dos_int21_dispatch(const DazeDosInt21Context *co
   if (result == NULL) return DAZE_DOS_INT21_DISPATCH_INVALID_ARGUMENT;
   begin_result(result);
   if (context == NULL || request == NULL) return DAZE_DOS_INT21_DISPATCH_INVALID_ARGUMENT;
+
+  const uint8_t ah = (uint8_t)(request->ax >> 8);
+  if ((ah == DAZE_DOS_EXEC || ah == DAZE_DOS_DELETE || ah == DAZE_DOS_RENAME ||
+       ah == DAZE_DOS_CREATE_TEMP || ah == DAZE_DOS_FILE_ATTR || ah == DAZE_DOS_FIND_FIRST ||
+       ah == DAZE_DOS_FIND_NEXT) &&
+      context->files != NULL && context->files->handles != NULL) {
+    int host_errno = 0;
+    if (daze_dosfs_handles_flush(context->files->handles, &host_errno) != DAZE_DOSFS_OK) {
+      result->disposition = DAZE_DOS_INT21_HANDLED;
+      result->register_write_mask = DAZE_DOS_INT21_REG_AX;
+      result->ax = daze_dosfs_errno_to_dos_error(host_errno);
+      set_flag(result, DAZE_DOS_INT21_FLAG_CF, 1);
+      return DAZE_DOS_INT21_DISPATCH_OK;
+    }
+  }
 
   switch ((uint8_t)(request->ax >> 8)) {
   case DAZE_DOS_GET_DATE: {

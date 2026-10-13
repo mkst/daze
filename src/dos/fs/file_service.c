@@ -112,8 +112,9 @@ void daze_dosfs_file_open(DazeDosfsFileService *service, const char *path, uint8
   }
   int host_fd = -1;
   int host_errno = 0;
-  DazeDosfsStatus status =
-    daze_dosfs_open_c(service->mounts, path, open_flags, 0, &host_fd, &host_errno);
+  DazeDosfsStatus status = daze_dosfs_handles_flush(service->handles, &host_errno);
+  if (status == DAZE_DOSFS_OK)
+    status = daze_dosfs_open_c(service->mounts, path, open_flags, 0, &host_fd, &host_errno);
   uint16_t handle = 0;
   if (status == DAZE_DOSFS_OK) {
     struct stat information;
@@ -149,8 +150,10 @@ static void file_create(DazeDosfsFileService *service, const char *path, int fla
   }
   int host_fd = -1;
   int host_errno = 0;
-  DazeDosfsStatus status =
-    daze_dosfs_open_c(service->mounts, path, O_RDWR | O_CREAT | flags, 0666, &host_fd, &host_errno);
+  DazeDosfsStatus status = daze_dosfs_handles_flush(service->handles, &host_errno);
+  if (status == DAZE_DOSFS_OK)
+    status = daze_dosfs_open_c(service->mounts, path, O_RDWR | O_CREAT | flags, 0666, &host_fd,
+                               &host_errno);
   uint16_t handle = 0;
   if (status == DAZE_DOSFS_OK)
     status = daze_dosfs_handles_adopt(service->handles, host_fd, &handle);
@@ -185,6 +188,7 @@ void daze_dosfs_file_seek(DazeDosfsFileService *service, uint16_t handle, uint8_
   int host_errno = 0;
   DazeDosfsStatus status = whence < 0 ? DAZE_DOSFS_INVALID_PATH
                                       : daze_dosfs_handles_get(service->handles, handle, &host_fd);
+  if (status == DAZE_DOSFS_HOST_ERROR) host_errno = errno;
   off_t position = -1;
   if (status == DAZE_DOSFS_OK) {
     position = lseek(host_fd, displacement, whence);
@@ -212,6 +216,7 @@ void daze_dosfs_file_read(DazeDosfsFileService *service, uint16_t handle, uint16
   int host_fd = -1;
   int host_errno = 0;
   DazeDosfsStatus status = daze_dosfs_handles_get(service->handles, handle, &host_fd);
+  if (status == DAZE_DOSFS_HOST_ERROR) host_errno = errno;
   if (status == DAZE_DOSFS_OK && count != 0) {
     result->bytes = malloc(count);
     if (result->bytes == NULL) {
@@ -252,6 +257,7 @@ void daze_dosfs_file_read_into(DazeDosfsFileService *service, uint16_t handle, u
   int host_fd = -1;
   int host_errno = 0;
   DazeDosfsStatus status = daze_dosfs_handles_get(service->handles, handle, &host_fd);
+  if (status == DAZE_DOSFS_HOST_ERROR) host_errno = errno;
   ssize_t bytes_read = 0;
   if (status == DAZE_DOSFS_OK && count != 0) {
     result->host_read_attempted = 1;
@@ -281,7 +287,9 @@ void daze_dosfs_file_write(DazeDosfsFileService *service, uint16_t handle, const
   }
   int host_fd = -1;
   int host_errno = 0;
-  DazeDosfsStatus status = daze_dosfs_handles_get(service->handles, handle, &host_fd);
+  DazeDosfsStatus status = count == 0 ? daze_dosfs_handles_get(service->handles, handle, &host_fd)
+                                      : daze_dosfs_handles_peek(service->handles, handle, &host_fd);
+  if (status == DAZE_DOSFS_HOST_ERROR) host_errno = errno;
   ssize_t written = 0;
   if (status == DAZE_DOSFS_OK && count == 0) {
     struct stat information;
@@ -298,9 +306,7 @@ void daze_dosfs_file_write(DazeDosfsFileService *service, uint16_t handle, const
   }
   if (status == DAZE_DOSFS_OK && count != 0) {
     result->host_write_attempted = 1;
-    do {
-      written = write(host_fd, bytes, count);
-    } while (written < 0 && errno == EINTR);
+    written = daze_dosfs_handles_write(service->handles, handle, bytes, count);
     if (written < 0) {
       host_errno = errno;
       status = DAZE_DOSFS_HOST_ERROR;

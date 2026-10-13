@@ -10,6 +10,23 @@ Unicorn retains its per-emulation instruction guard. To bound elapsed time,
 use host process cancellation or an external timeout (for example,
 `timeout 60s ./build/debug/daze --backend kvm --mount "$work_dir" TOOL.EXE`).
 
+## File write buffering
+
+Regular output files use a 16 KiB write buffer on both backends. Set the host
+environment variable `DAZE_BUFFERED_WRITES=0` to use immediate writes:
+
+```sh
+DAZE_BUFFERED_WRITES=0 ./build/debug/daze --backend kvm --mount "$work_dir" TOOL.EXE
+```
+
+Reads, seeks, metadata access and close flush pending data. Duplicate and
+inherited handles share the buffer; independently opened handles to the same
+file disable buffering for that file. Host standard streams and devices remain
+unbuffered. Small writes can report success before a disk-full, quota or
+file-size error is discovered during a later flush. Flush failures are returned
+to the guest; failures during implicit exit cleanup also make the host exit
+nonzero. Process cancellation can lose data still in the buffer.
+
 ## Unicorn instruction trace
 
 Use an explicitly selected Unicorn backend and an established narrow linear
