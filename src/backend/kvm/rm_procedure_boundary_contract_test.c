@@ -10,6 +10,43 @@
 #endif
 
 #if defined(__linux__) && (defined(__x86_64__) || defined(__i386__))
+static void protected_return_contract(void) {
+  uint8_t guest[0x2400] = {0};
+  DazeKvmMachine machine = {.guest = guest, .guest_size = sizeof(guest)};
+  const ParkedState parked = {.regs = {.rax = 0x12345678, .rip = 0x87654321, .rflags = 2},
+                              .sregs = {.cr0 = 0x11, .cs = {.selector = DAZE_SEL_GATE_CODE}}};
+  const struct kvm_sregs returned = {.cr0 = 0x10};
+  for (unsigned kind = 0; kind < 8; ++kind) {
+    ParkedState state = parked;
+    struct kvm_sregs current = returned;
+    if (kind == 0) state.sregs.cs.selector = 8;
+    if (kind == 1) state.sregs.cr0 |= 0x80000000u;
+    if (kind == 2) state.sregs.cr0 &= ~UINT64_C(1);
+    if (kind == 3) current.cr0 ^= 0x10;
+    if (kind == 4) state.regs.rax = UINT64_C(1) << 32;
+    if (kind == 5) state.regs.rip = UINT64_C(1) << 32;
+    if (kind == 6) state.regs.rflags |= 1u << 8;
+    if (kind == 7) state.regs.rflags |= 1u << 17;
+    const ParkedState before = state;
+    assert(prepare_protected_return(&machine, &state, &current) == 0);
+    assert(memcmp(&before, &state, sizeof(state)) == 0);
+  }
+  ParkedState state = parked;
+  machine.guest_size = k_pm_reentry_wrapper;
+  assert(prepare_protected_return(&machine, &state, &returned) == -1);
+  machine.guest_size = k_pm_reentry_state;
+  assert(prepare_protected_return(&machine, &state, &returned) == -1);
+  machine.guest_size = sizeof(guest);
+  assert(prepare_protected_return(&machine, &state, &returned) == 1);
+  assert(state.sregs.cr0 == returned.cr0 && state.sregs.cs.selector == DAZE_SEL_GATE &&
+         state.sregs.cs.base == 0x2000 && state.regs.rip == 0x180 &&
+         state.regs.rax == parked.regs.rax && state.regs.rflags == parked.regs.rflags);
+  assert(daze_read_u32(guest + k_pm_reentry_wrapper + 2) == parked.sregs.cr0 &&
+         daze_read_u32(guest + k_pm_reentry_wrapper + 16) == parked.regs.rip &&
+         daze_read_u16(guest + k_pm_reentry_wrapper + 20) == DAZE_SEL_GATE_CODE &&
+         daze_read_u32(guest + k_pm_reentry_state) == parked.regs.rax);
+}
+
 static void descriptor_reply_contract(void) {
   uint8_t guest[0x1000] = {0};
   uint8_t used[32] = {0};
@@ -190,7 +227,8 @@ static void input_and_metrics_contract(void) {
   }
   assert(!daze_kvm_rm_procedure_reflect(&input, &successor));
   assert(!serve_runner(&machine, &files, NULL, &mediator, 0x200, 0x21));
-  assert(!write_back_frame(&machine, 0x100));
+  struct kvm_sregs returned_sregs;
+  assert(!write_back_frame(&machine, 0x100, &returned_sregs));
   assert(reflect_run(&machine, &files, NULL, &mediator, 0x200) == RMRUN_STOP);
   dump_rejected_far_load(&machine, &(struct kvm_regs){.rip = 0x1234});
   DazeRunMetrics metrics = {0};
@@ -235,6 +273,7 @@ static void input_and_metrics_contract(void) {
 }
 
 int main(void) {
+  protected_return_contract();
   descriptor_reply_contract();
   input_and_metrics_contract();
   return 0;

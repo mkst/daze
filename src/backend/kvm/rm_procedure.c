@@ -11,6 +11,7 @@
 #include "runner_resume.h"
 #include "runner_private.h"
 #include "selector.h"
+#include "guest_memory_layout.h"
 
 #include <inttypes.h>
 #include <stdio.h>
@@ -104,6 +105,34 @@ static struct kvm_segment protected_code_segment(uint16_t selector, uint32_t bas
   segment.present = 1;
   segment.s = 1;
   return segment;
+}
+
+static int prepare_protected_return(DazeKvmMachine *machine, ParkedState *state,
+                                    const struct kvm_sregs *returned) {
+  if (state->sregs.cs.selector != DAZE_SEL_GATE_CODE || (state->sregs.cr0 & 0x80000001u) != 1 ||
+      returned->cr0 != (state->sregs.cr0 & ~UINT64_C(1)) || state->regs.rax > UINT32_MAX ||
+      state->regs.rip > UINT32_MAX || (state->regs.rflags & ((1u << 8) | (1u << 17))))
+    return 0;
+  /* Restoring CR0 through KVM resets the MMU even for PE-only changes.
+   * Set PE in guest code; retain the parked data/stack descriptor caches. */
+  uint8_t code[] = {
+    0x66, 0xb8, 0,    0,    0,    0,       /* mov eax, protected_cr0 */
+    0x0f, 0x22, 0xc0,                      /* mov cr0, eax */
+    0x2e, 0x66, 0xa1, 0x00, 0x02,          /* mov eax, cs:[0200h] */
+    0x66, 0xea, 0,    0,    0,    0, 0, 0, /* jmp far protected_cs:eip */
+  };
+  daze_write_u32(code + 2, (uint32_t)state->sregs.cr0);
+  daze_write_u32(code + 16, (uint32_t)state->regs.rip);
+  daze_write_u16(code + 20, state->sregs.cs.selector);
+  uint8_t saved_eax[4];
+  daze_write_u32(saved_eax, (uint32_t)state->regs.rax);
+  if (!daze_kvm_machine_write(machine, k_pm_reentry_wrapper, code, sizeof(code)) ||
+      !daze_kvm_machine_write(machine, k_pm_reentry_state, saved_eax, sizeof(saved_eax)))
+    return -1;
+  state->sregs.cr0 = returned->cr0;
+  state->sregs.cs = protected_code_segment(RM_GATE_CS_SELECTOR, RM_GATE_CS_BASE);
+  state->regs.rip = k_pm_reentry_wrapper - RM_GATE_CS_BASE;
+  return 1;
 }
 
 static int enter_guest_transition(DazeKvmMachine *machine,
@@ -364,7 +393,8 @@ static int timed_serve_runner(DazeKvmMachine *machine, DazeDosfsFileService *fil
   return status;
 }
 
-static int write_back_frame(DazeKvmMachine *machine, uint32_t frame_address) {
+static int write_back_frame(DazeKvmMachine *machine, uint32_t frame_address,
+                            struct kvm_sregs *returned) {
   struct kvm_regs regs;
   struct kvm_sregs sregs;
   if (daze_kvm_machine_get_regs(machine, &regs) != DAZE_KVM_MACHINE_OK ||
@@ -388,6 +418,7 @@ static int write_back_frame(DazeKvmMachine *machine, uint32_t frame_address) {
   };
   daze_dpmi_rm_frame_write_back(frame, &image);
   memcpy((uint8_t *)machine->guest + frame_address, frame, sizeof(frame));
+  *returned = sregs;
   return 1;
 }
 
@@ -640,10 +671,18 @@ int daze_kvm_rm_procedure_reflect(const DazeKvmRmProcedureInput *input,
   const uint64_t reflect_finished =
     metrics != NULL && metrics->enabled ? monotonic_nanoseconds() : 0;
   int completed = 0;
-  if (status == RMRUN_COMPLETE) completed = write_back_frame(machine, rm->frame_address);
+  struct kvm_sregs returned;
+  if (status == RMRUN_COMPLETE) completed = write_back_frame(machine, rm->frame_address, &returned);
+  if (completed) {
+    if (prepare_protected_return(machine, &post_pio, &returned) < 0) {
+      fprintf(stderr, "kvm-rm-procedure: cannot prepare protected return\n");
+      return 0;
+    }
+  }
   /* Restore the immediate successor, before any mailbox load has executed. */
-  (void)daze_kvm_machine_set_sregs(machine, &post_pio.sregs);
-  (void)daze_kvm_machine_set_regs(machine, &post_pio.regs);
+  if (daze_kvm_machine_set_sregs(machine, &post_pio.sregs) != DAZE_KVM_MACHINE_OK ||
+      daze_kvm_machine_set_regs(machine, &post_pio.regs) != DAZE_KVM_MACHINE_OK)
+    return 0;
   if (!completed) return 0;
   const uint64_t resume_started = metrics != NULL && metrics->enabled ? monotonic_nanoseconds() : 0;
   if (input->protected_return_linear != 0) {
