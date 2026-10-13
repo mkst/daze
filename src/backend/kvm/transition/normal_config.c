@@ -22,7 +22,7 @@ enum {
   k_protected_mailbox = k_protected_record + 0x40,
   k_state_save_handler = k_protected_mailbox + 0x40,
   k_raw_switch_handler = k_state_save_handler + 0x20,
-  k_gate_end = k_gate_base + 0x420,
+  k_gate_end = k_gate_base + 0x540,
   /* 0040h and 0048h belong to client and exception stacks. Private gates must avoid
    * them; the 0060h alias is 32-bit for the default DOS stub's far jump. */
   k_gate_code_selector = DAZE_SEL_GATE_CODE,
@@ -243,6 +243,8 @@ int daze_kvm_normal_transition_config_build(const DazeKvmNormalTransitionConfigI
     .exception_gate_vector = DAZE_INT_GP_FAULT,
     .exception_gate_type = 0x8e,
     .legacy_np_capture_address = k_gate_base + 0x400,
+    .virtual_handler_address = k_gate_base + 0x500,
+    .virtual_control_address = k_protected_record + DAZE_KVM_DPMI_RECORD_SIZE,
   };
   candidate.state_save_gate = (DazeKvmStateSaveGateLayout){k_idt_address, k_state_save_handler,
                                                            k_idt_limit, k_gate_code_selector};

@@ -262,12 +262,31 @@ void daze_metrics_report_run(const DazeRunMetrics *metrics) {
                 : (double)metrics->kvm_dpmi_mediator_nanoseconds /
                     metrics->kvm_dpmi_mediator_calls / 1000.0);
       if (metrics->kvm_rm_procedure_calls != 0) {
+        static const char *const cost_names[DAZE_RUN_METRICS_RM_COST_COUNT] = {"date-2ah",
+                                                                               "time-2ch", "other"};
+        for (size_t kind = 0; kind < DAZE_RUN_METRICS_RM_COST_COUNT; ++kind) {
+          const DazeRunMetricsRmProcedureCost *cost = &metrics->kvm_rm_procedure_costs[kind];
+          if (cost->calls == 0) continue;
+          fprintf(stderr,
+                  "metrics: kvm-rm-procedure-cost %s calls=%" PRIu64
+                  " total=%.3fms average=%.1fus setup=%.3fms reflect=%.3fms cleanup=%.3fms"
+                  " resume=%.3fms reflect-KVM_RUN=%.3fms resume-KVM_RUN=%.3fms"
+                  " dos-service=%.3fms\n",
+                  cost_names[kind], cost->calls, (double)cost->total_nanoseconds / 1000000.0,
+                  (double)cost->total_nanoseconds / cost->calls / 1000.0,
+                  (double)cost->setup_nanoseconds / 1000000.0,
+                  (double)cost->reflect_nanoseconds / 1000000.0,
+                  (double)cost->cleanup_nanoseconds / 1000000.0,
+                  (double)cost->resume_nanoseconds / 1000000.0,
+                  (double)cost->reflect_run_nanoseconds / 1000000.0,
+                  (double)cost->resume_run_nanoseconds / 1000000.0,
+                  (double)cost->service_nanoseconds / 1000000.0);
+        }
         const uint64_t setup_accounted =
           metrics->kvm_rm_procedure_setup_parked_capture_nanoseconds +
           metrics->kvm_rm_procedure_setup_retire_nanoseconds +
           metrics->kvm_rm_procedure_setup_post_pio_capture_nanoseconds +
-          metrics->kvm_rm_procedure_setup_transition_nanoseconds +
-          metrics->kvm_rm_procedure_setup_debug_arm_nanoseconds;
+          metrics->kvm_rm_procedure_setup_transition_nanoseconds;
         const uint64_t setup_other =
           metrics->kvm_rm_procedure_setup_nanoseconds > setup_accounted
             ? metrics->kvm_rm_procedure_setup_nanoseconds - setup_accounted
@@ -294,12 +313,11 @@ void daze_metrics_report_run(const DazeRunMetrics *metrics) {
                 (double)metrics->kvm_rm_procedure_resume_nanoseconds / 1000000.0);
         fprintf(stderr,
                 "metrics: kvm-rm-procedure-setup parked-capture=%.3fms retire=%.3fms "
-                "post-pio-capture=%.3fms transition=%.3fms debug-arm=%.3fms other=%.3fms\n",
+                "post-pio-capture=%.3fms transition=%.3fms other=%.3fms\n",
                 (double)metrics->kvm_rm_procedure_setup_parked_capture_nanoseconds / 1000000.0,
                 (double)metrics->kvm_rm_procedure_setup_retire_nanoseconds / 1000000.0,
                 (double)metrics->kvm_rm_procedure_setup_post_pio_capture_nanoseconds / 1000000.0,
                 (double)metrics->kvm_rm_procedure_setup_transition_nanoseconds / 1000000.0,
-                (double)metrics->kvm_rm_procedure_setup_debug_arm_nanoseconds / 1000000.0,
                 (double)setup_other / 1000000.0);
         const uint64_t resume_accounted = metrics->kvm_rm_procedure_resume_run_nanoseconds +
                                           metrics->kvm_rm_procedure_resume_capture_nanoseconds;
@@ -364,6 +382,11 @@ void daze_metrics_report_run(const DazeRunMetrics *metrics) {
         fprintf(stderr, " overflow=%" PRIu64, metrics->kvm_virtual_interrupt_site_overflow_calls);
       fprintf(stderr, "\n");
     }
+    if (metrics->kvm_guest_virtual_interrupt_calls[0] != 0 ||
+        metrics->kvm_guest_virtual_interrupt_calls[1] != 0)
+      fprintf(stderr, "metrics: kvm-guest-virtual-interrupts 0900h=%" PRIu64 " 0901h=%" PRIu64 "\n",
+              metrics->kvm_guest_virtual_interrupt_calls[0],
+              metrics->kvm_guest_virtual_interrupt_calls[1]);
     fprintf(stderr,
             "metrics: kvm-boundary-broker=%" PRIu64 " dos=%" PRIu64 " dpmi-entry=%" PRIu64
             " other=%" PRIu64 " service=%.3fms average=%.1fus\n",

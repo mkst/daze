@@ -59,6 +59,26 @@ static uint64_t elapsed_nanoseconds(uint64_t started, uint64_t finished) {
   return finished >= started ? finished - started : 0;
 }
 
+static void record_procedure_cost(DazeRunMetrics *metrics, uint64_t runner_calls,
+                                  uint64_t date_calls, uint64_t time_calls,
+                                  const DazeRunMetricsRmProcedureCost *cost) {
+  /* Attribute a whole detour only when it serviced exactly one clock request.
+   * Arbitrary far procedures may service multiple or unrelated boundaries. */
+  const unsigned kind = runner_calls == 1 && date_calls == 1   ? DAZE_RUN_METRICS_RM_DATE
+                        : runner_calls == 1 && time_calls == 1 ? DAZE_RUN_METRICS_RM_TIME
+                                                               : DAZE_RUN_METRICS_RM_OTHER;
+  DazeRunMetricsRmProcedureCost *entry = &metrics->kvm_rm_procedure_costs[kind];
+  entry->calls++;
+  entry->total_nanoseconds += cost->total_nanoseconds;
+  entry->setup_nanoseconds += cost->setup_nanoseconds;
+  entry->reflect_nanoseconds += cost->reflect_nanoseconds;
+  entry->cleanup_nanoseconds += cost->cleanup_nanoseconds;
+  entry->resume_nanoseconds += cost->resume_nanoseconds;
+  entry->reflect_run_nanoseconds += cost->reflect_run_nanoseconds;
+  entry->resume_run_nanoseconds += cost->resume_run_nanoseconds;
+  entry->service_nanoseconds += cost->service_nanoseconds;
+}
+
 static void real_segment(struct kvm_segment *segment, uint16_t selector, uint8_t type) {
   *segment = (struct kvm_segment){0};
   segment->base = (uint32_t)selector << 4;
@@ -109,11 +129,7 @@ static int enter_guest_transition(DazeKvmMachine *machine,
     0x2e, 0xff, 0x2e, 0x60, 0x01, /* jmp far cs:[0160h] */
   };
   static const uint8_t gate[] = {
-    0xfa,                         /* cli */
-    0x0f, 0x20, 0xc0,             /* mov eax, cr0 */
-    0x83, 0xc8, 0x01,             /* or ax, 1 */
-    0x0f, 0x22, 0xc0,             /* mov cr0, eax */
-    0xea, 0x80, 0x01, 0x28, 0x00, /* jmp far DAZE_SEL_GATE:0180h */
+    0xf4, /* hlt */
   };
   const uint8_t target[4] = {(uint8_t)rm->target_ip, (uint8_t)(rm->target_ip >> 8),
                              (uint8_t)rm->target_cs, (uint8_t)(rm->target_cs >> 8)};
@@ -377,6 +393,12 @@ static int write_back_frame(DazeKvmMachine *machine, uint32_t frame_address) {
 
 enum { RMRUN_STOP, RMRUN_COMPLETE };
 
+static int returned_to_gate(const struct kvm_regs *regs, const struct kvm_sregs *sregs) {
+  /* VMX and SVM retire HLT before KVM_EXIT_HLT; Daze has no in-kernel LAPIC. */
+  return !(sregs->cr0 & 1) && sregs->cs.selector == DAZE_DPMI_RM_RETURN_CS &&
+         sregs->cs.base == DAZE_DPMI_RM_GATE_LINEAR && regs->rip == DAZE_DPMI_RM_RETURN_IP + 1;
+}
+
 static int reflect_run(DazeKvmMachine *machine, DazeDosfsFileService *files,
                        DazeDosProcessState *process_state, const DazeKvmDpmiMediator *mediator,
                        uint16_t dpmi_entry_segment) {
@@ -386,13 +408,16 @@ static int reflect_run(DazeKvmMachine *machine, DazeDosfsFileService *files,
       fprintf(stderr, "kvm-rm-procedure: run failed\n");
       return RMRUN_STOP;
     }
-    if (run->exit_reason == KVM_EXIT_DEBUG) {
-      if (run->debug.arch.pc != DAZE_DPMI_RM_GATE_LINEAR) {
-        fprintf(stderr, "kvm-rm-procedure: unexpected debug at pc=%llx\n",
-                (unsigned long long)run->debug.arch.pc);
-        return RMRUN_STOP;
-      }
-      return RMRUN_COMPLETE;
+    if (run->exit_reason == KVM_EXIT_HLT) {
+      struct kvm_regs regs = {0};
+      struct kvm_sregs sregs = {0};
+      if (daze_kvm_machine_get_regs(machine, &regs) == DAZE_KVM_MACHINE_OK &&
+          daze_kvm_machine_get_sregs(machine, &sregs) == DAZE_KVM_MACHINE_OK &&
+          returned_to_gate(&regs, &sregs))
+        return RMRUN_COMPLETE;
+      fprintf(stderr, "kvm-rm-procedure: unexpected halt cr0=%llx cs=%04x base=%llx rip=%llx\n",
+              (unsigned long long)sregs.cr0, sregs.cs.selector, (unsigned long long)sregs.cs.base,
+              (unsigned long long)regs.rip);
     }
     if (run->exit_reason != KVM_EXIT_IO) {
       struct kvm_regs uregs = {0};
@@ -523,6 +548,15 @@ int daze_kvm_rm_procedure_reflect(const DazeKvmRmProcedureInput *input,
   DazeRunMetrics *const metrics = machine->run_metrics;
   const uint64_t started = metrics != NULL && metrics->enabled ? monotonic_nanoseconds() : 0;
   const DazeDpmiRmProcedure *const rm = &input->mediator->rm_procedure;
+  uint64_t runner_calls_before = 0, date_calls_before = 0, time_calls_before = 0;
+  uint64_t reflect_run_before = 0, service_before = 0;
+  if (metrics != NULL && metrics->enabled) {
+    runner_calls_before = metrics->kvm_rm_procedure_reflect_runner_calls;
+    date_calls_before = metrics->kvm_dos_functions[0x2a];
+    time_calls_before = metrics->kvm_dos_functions[0x2c];
+    reflect_run_before = metrics->kvm_rm_procedure_run_nanoseconds;
+    service_before = metrics->kvm_boundary_broker_nanoseconds;
+  }
   if (machine->vcpu < 0 || machine->run == NULL ||
       !daze_kvm_range_fits(machine->guest_size, rm->frame_address, DAZE_DPMI_RM_FRAME_SIZE) ||
       !daze_kvm_range_fits(machine->guest_size, rm->stack_address,
@@ -600,33 +634,18 @@ int daze_kvm_rm_procedure_reflect(const DazeKvmRmProcedureInput *input,
   }
   const uint64_t transition_finished =
     metrics != NULL && metrics->enabled ? monotonic_nanoseconds() : 0;
-  const uint64_t debug_arm_started =
-    metrics != NULL && metrics->enabled ? monotonic_nanoseconds() : 0;
-  struct kvm_guest_debug debug = {.control = KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_USE_HW_BP};
-  debug.arch.debugreg[0] = DAZE_DPMI_RM_GATE_LINEAR;
-  debug.arch.debugreg[7] = 3;
-  const int armed = ioctl(machine->vcpu, KVM_SET_GUEST_DEBUG, &debug) == 0;
-  const uint64_t debug_arm_finished =
-    metrics != NULL && metrics->enabled ? monotonic_nanoseconds() : 0;
   const uint64_t reflect_started =
     metrics != NULL && metrics->enabled ? monotonic_nanoseconds() : 0;
-  const int status = armed ? reflect_run(machine, input->files, input->process_state,
-                                         input->mediator, input->dpmi_entry_segment)
-                           : RMRUN_STOP;
+  const int status = reflect_run(machine, input->files, input->process_state, input->mediator,
+                                 input->dpmi_entry_segment);
   const uint64_t reflect_finished =
     metrics != NULL && metrics->enabled ? monotonic_nanoseconds() : 0;
   int completed = 0;
   if (status == RMRUN_COMPLETE) completed = write_back_frame(machine, rm->frame_address);
-  const int debug_cleared =
-    ioctl(machine->vcpu, KVM_SET_GUEST_DEBUG, &(const struct kvm_guest_debug){0}) == 0;
   /* Restore the immediate successor, before any mailbox load has executed. */
   (void)daze_kvm_machine_set_sregs(machine, &post_pio.sregs);
   (void)daze_kvm_machine_set_regs(machine, &post_pio.regs);
-  if (!completed || !debug_cleared || !armed) {
-    if (armed && !debug_cleared && !completed)
-      fprintf(stderr, "kvm-rm-procedure: cleanup failed\n");
-    return 0;
-  }
+  if (!completed) return 0;
   const uint64_t resume_started = metrics != NULL && metrics->enabled ? monotonic_nanoseconds() : 0;
   if (input->protected_return_linear != 0) {
     struct kvm_guest_debug debug = {.control = KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_USE_HW_BP};
@@ -659,8 +678,6 @@ int daze_kvm_rm_procedure_reflect(const DazeKvmRmProcedureInput *input,
       elapsed_nanoseconds(post_pio_capture_started, post_pio_capture_finished);
     metrics->kvm_rm_procedure_setup_transition_nanoseconds +=
       elapsed_nanoseconds(transition_started, transition_finished);
-    metrics->kvm_rm_procedure_setup_debug_arm_nanoseconds +=
-      elapsed_nanoseconds(debug_arm_started, debug_arm_finished);
     metrics->kvm_rm_procedure_reflect_nanoseconds +=
       elapsed_nanoseconds(reflect_started, reflect_finished);
     metrics->kvm_rm_procedure_cleanup_nanoseconds +=
@@ -673,6 +690,21 @@ int daze_kvm_rm_procedure_reflect(const DazeKvmRmProcedureInput *input,
     metrics->kvm_rm_procedure_resume_capture_nanoseconds +=
       metrics->kvm_dpmi_state_capture_nanoseconds[DAZE_RUN_METRICS_DPMI_CAPTURE_CONTINUE_ONCE] -
       resume_capture_before;
+    record_procedure_cost(
+      metrics, metrics->kvm_rm_procedure_reflect_runner_calls - runner_calls_before,
+      metrics->kvm_dos_functions[0x2a] - date_calls_before,
+      metrics->kvm_dos_functions[0x2c] - time_calls_before,
+      &(const DazeRunMetricsRmProcedureCost){
+        .total_nanoseconds = elapsed_nanoseconds(started, finished),
+        .setup_nanoseconds = elapsed_nanoseconds(started, reflect_started),
+        .reflect_nanoseconds = elapsed_nanoseconds(reflect_started, reflect_finished),
+        .cleanup_nanoseconds = elapsed_nanoseconds(reflect_finished, resume_started),
+        .resume_nanoseconds = elapsed_nanoseconds(resume_started, resume_finished),
+        .reflect_run_nanoseconds = metrics->kvm_rm_procedure_run_nanoseconds - reflect_run_before,
+        .resume_run_nanoseconds =
+          metrics->kvm_dpmi_run_nanoseconds[DAZE_RUN_METRICS_DPMI_RUN_CONTINUE_ONCE] -
+          resume_run_before,
+        .service_nanoseconds = metrics->kvm_boundary_broker_nanoseconds - service_before});
   }
   return resumed;
 #else

@@ -272,7 +272,7 @@ static void transition_write_contract(void) {
   handoff.entry_snapshot.sp = 1;
   assert(!plan_preserves_handoff_frame(&plan, &handoff, 0x1000));
 
-  DazeKvmGuestWrite writes[DAZE_KVM_TRANSITION_PLAN_WRITE_COUNT + 11];
+  DazeKvmGuestWrite writes[DAZE_KVM_TRANSITION_PLAN_WRITE_COUNT + 13];
   DazeKvmDpmiEntryLayout output;
   plan.write_count = DAZE_KVM_TRANSITION_PLAN_WRITE_COUNT + 1;
   memset(&output, 0xa5, sizeof(output));
@@ -283,6 +283,42 @@ static void transition_write_contract(void) {
   assert(!plan_entry_layout(NULL, NULL, NULL, NULL, NULL, NULL, NULL, writes, &output, 0, 0x1000));
   assert(!plan_entry_layout(&plan, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &output, 0, 0x1000));
   assert(!plan_entry_layout(&plan, NULL, NULL, NULL, NULL, NULL, NULL, writes, NULL, 0, 0x1000));
+  DazeKvmProtectedGateLayout virtual_gate = {.virtual_handler_address = 0x800,
+                                             .virtual_control_address = 0x880,
+                                             .handler_address = 0x200,
+                                             .dos_handler_address = 0x300,
+                                             .default_dos_stub_address = 0x400,
+                                             .idt_address = 0x500};
+  DazeKvmProtectedGateArtifacts virtual_artifacts = {.virtual_handler_size = 32,
+                                                     .handler_size = 16,
+                                                     .dos_handler_size = 16,
+                                                     .default_dos_stub_size = 16};
+  assert(plan_entry_layout(&plan, &virtual_gate, &virtual_artifacts, NULL, NULL, NULL, NULL, writes,
+                           &output, 0, 0x1000));
+  for (unsigned i = 0; i < 5; i++) {
+    DazeKvmProtectedGateLayout bad = virtual_gate;
+    if (i == 0) bad.virtual_handler_address = 0xff0;
+    if (i == 1) bad.virtual_control_address = 0xff0;
+    if (i == 2) bad.virtual_handler_address = bad.dos_handler_address;
+    if (i == 3) bad.virtual_control_address = bad.handler_address;
+    DazeKvmTransitionReservedRange reserved = {.address = 0x800, .size = 32};
+    if (i == 4) {
+      plan.reserved_ranges[0] = reserved;
+      plan.reserved_range_count = 1;
+    }
+    assert(!plan_entry_layout(&plan, &bad, &virtual_artifacts, NULL, NULL, NULL, NULL, writes,
+                              &output, 0, 0x1000));
+    plan.reserved_range_count = 0;
+  }
+  uint8_t guest[0x1000] = {0};
+  guest[virtual_gate.virtual_control_address] = 2;
+  DazeKvmCommandOwnerHandoff owner = {.machine = {.guest = guest, .guest_size = sizeof(guest)}};
+  DazeDpmiProcessState dpmi = {0};
+  DazeKvmCommandOwnerInput input = {.state = &dpmi};
+  DazeKvmDpmiEntryResult boundary = {0};
+  DazeKvmCommandOwnerResult result = {0};
+  assert(dispatch_boundaries(&owner, &input, NULL, NULL, NULL, &virtual_gate, NULL, NULL, NULL,
+                             NULL, &boundary, &result) == DAZE_KVM_COMMAND_OWNER_POSTSTART_FAILED);
 }
 
 int main(void) {

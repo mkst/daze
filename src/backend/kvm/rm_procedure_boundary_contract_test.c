@@ -115,6 +115,20 @@ static void descriptor_reply_contract(void) {
 }
 
 static void input_and_metrics_contract(void) {
+  const struct kvm_regs returned = {.rip = DAZE_DPMI_RM_RETURN_IP + 1};
+  const struct kvm_sregs returned_segments = {
+    .cs = {.selector = DAZE_DPMI_RM_RETURN_CS, .base = DAZE_DPMI_RM_GATE_LINEAR}};
+  assert(returned_to_gate(&returned, &returned_segments));
+  for (int kind = 0; kind < 5; ++kind) {
+    struct kvm_regs regs = returned;
+    struct kvm_sregs sregs = returned_segments;
+    if (kind == 0) sregs.cr0 = 1;
+    if (kind == 1) sregs.cs.selector++;
+    if (kind == 2) sregs.cs.base++;
+    if (kind == 3) regs.rip--;
+    if (kind == 4) regs.rip++;
+    assert(!returned_to_gate(&regs, &sregs));
+  }
   uint8_t guest[0x4000] = {0};
   struct kvm_run run = {0};
   DazeKvmMachine machine = {.guest = guest,
@@ -196,6 +210,28 @@ static void input_and_metrics_contract(void) {
          metrics.kvm_rm_procedure_reflect_vectors[0].nanoseconds == 40 &&
          metrics.kvm_rm_procedure_reflect_vector_overflow_calls == 1);
   assert(elapsed_nanoseconds(20, 10) == 0 && elapsed_nanoseconds(10, 20) == 10);
+  const DazeRunMetricsRmProcedureCost cost = {.total_nanoseconds = 100,
+                                              .setup_nanoseconds = 10,
+                                              .reflect_nanoseconds = 60,
+                                              .cleanup_nanoseconds = 5,
+                                              .resume_nanoseconds = 25,
+                                              .reflect_run_nanoseconds = 40,
+                                              .resume_run_nanoseconds = 20,
+                                              .service_nanoseconds = 3};
+  record_procedure_cost(&metrics, 1, 1, 0, &cost);
+  record_procedure_cost(&metrics, 1, 1, 0, &cost);
+  record_procedure_cost(&metrics, 1, 0, 1, &cost);
+  record_procedure_cost(&metrics, 2, 1, 1, &cost);
+  record_procedure_cost(&metrics, 0, 0, 0, &cost);
+  record_procedure_cost(&metrics, 1, 0, 0, &cost);
+  const DazeRunMetricsRmProcedureCost *date =
+    &metrics.kvm_rm_procedure_costs[DAZE_RUN_METRICS_RM_DATE];
+  assert(date->calls == 2 && date->total_nanoseconds == 200 && date->setup_nanoseconds == 20 &&
+         date->reflect_nanoseconds == 120 && date->cleanup_nanoseconds == 10 &&
+         date->resume_nanoseconds == 50 && date->reflect_run_nanoseconds == 80 &&
+         date->resume_run_nanoseconds == 40 && date->service_nanoseconds == 6);
+  assert(metrics.kvm_rm_procedure_costs[DAZE_RUN_METRICS_RM_TIME].calls == 1 &&
+         metrics.kvm_rm_procedure_costs[DAZE_RUN_METRICS_RM_OTHER].calls == 3);
 }
 
 int main(void) {

@@ -126,6 +126,14 @@ static int plan_entry_layout(const DazeKvmTransitionPlan *plan,
     writes[index] = plan->writes[index];
   size_t write_count = plan->write_count;
   if (gate != NULL && gate_artifacts != NULL) {
+    if (gate->virtual_handler_address) {
+      writes[write_count++] = (DazeKvmGuestWrite){.address = gate->virtual_handler_address,
+                                                  .bytes = gate_artifacts->virtual_handler,
+                                                  .size = gate_artifacts->virtual_handler_size};
+      writes[write_count++] = (DazeKvmGuestWrite){.address = gate->virtual_control_address,
+                                                  .bytes = gate_artifacts->virtual_control,
+                                                  .size = sizeof(gate_artifacts->virtual_control)};
+    }
     writes[write_count++] = (DazeKvmGuestWrite){.address = gate->handler_address,
                                                 .bytes = gate_artifacts->handler,
                                                 .size = gate_artifacts->handler_size};
@@ -165,6 +173,20 @@ static int plan_entry_layout(const DazeKvmTransitionPlan *plan,
       (DazeKvmGuestWrite){.address = raw_gate->idt_address + DAZE_KVM_RAW_SWITCH_GATE_VECTOR * 8u,
                           .bytes = raw_gate_artifacts->idt_entry,
                           .size = sizeof(raw_gate_artifacts->idt_entry)};
+  }
+  if (gate != NULL && gate->virtual_handler_address != 0) {
+    for (size_t i = plan->write_count; i < plan->write_count + 2; i++) {
+      if (!daze_kvm_range_fits_nonempty(guest_size, writes[i].address, writes[i].size)) return 0;
+      for (size_t j = 0; j < write_count; j++)
+        if (i != j && daze_kvm_ranges_overlap(writes[i].address, writes[i].size, writes[j].address,
+                                              writes[j].size))
+          return 0;
+      for (size_t j = 0; j < plan->reserved_range_count; j++)
+        if (daze_kvm_ranges_overlap(writes[i].address, writes[i].size,
+                                    plan->reserved_ranges[j].address,
+                                    plan->reserved_ranges[j].size))
+          return 0;
+    }
   }
   *layout =
     (DazeKvmDpmiEntryLayout){.writes = writes,
@@ -947,6 +969,9 @@ dispatch_boundaries(DazeKvmCommandOwnerHandoff *handoff, const DazeKvmCommandOwn
     initial_boundary != NULL ? *initial_boundary : result->protected_gate.terminal;
   int first_boundary = 1;
   for (;;) {
+    if (!daze_kvm_protected_gate_sync_virtual_interrupts(machine, gate,
+                                                         &input->state->virtual_interrupts_enabled))
+      return DAZE_KVM_COMMAND_OWNER_POSTSTART_FAILED;
     if (!daze_kvm_resident_vector_projections_refresh(machine, &handoff->resident_gdt, dos_memory))
       return DAZE_KVM_COMMAND_OWNER_POSTSTART_FAILED;
     result->post_successor = boundary;
@@ -1386,6 +1411,8 @@ static int continue_from_handoff(DazeKvmCommandOwnerHandoff *handoff,
     result->disposition = DAZE_KVM_COMMAND_OWNER_POSTSTART_FAILED;
     goto out;
   }
+  if (gate != NULL && gate->virtual_control_address && live_boundary != NULL)
+    gate_artifacts.virtual_control[0] = input->state->virtual_interrupts_enabled != 0;
   if (state_gate != NULL && !daze_kvm_state_save_gate_build(state_gate, &state_gate_artifacts)) {
     result->disposition = DAZE_KVM_COMMAND_OWNER_POSTSTART_FAILED;
     goto out;
@@ -1394,7 +1421,7 @@ static int continue_from_handoff(DazeKvmCommandOwnerHandoff *handoff,
     result->disposition = DAZE_KVM_COMMAND_OWNER_POSTSTART_FAILED;
     goto out;
   }
-  DazeKvmGuestWrite writes[DAZE_KVM_TRANSITION_PLAN_WRITE_COUNT + 11];
+  DazeKvmGuestWrite writes[DAZE_KVM_TRANSITION_PLAN_WRITE_COUNT + 13];
   DazeKvmDpmiEntryLayout entry_layout;
   const DazeKvmTransitionWriterInput writer = {
     &machine,
