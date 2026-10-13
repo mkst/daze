@@ -606,8 +606,7 @@ int daze_kvm_rm_procedure_reflect(const DazeKvmRmProcedureInput *input,
   }
   const uint64_t post_pio_capture_started =
     metrics != NULL && metrics->enabled ? monotonic_nanoseconds() : 0;
-  /* Software retirement changes only RIP. The sync area still contains the
-   * pre-retire RIP until KVM_RUN, so derive the restoration state here. */
+  /* The protected return belongs immediately after the validated OUT. */
   ParkedState post_pio = parked;
   post_pio.regs.rip += 2;
   const uint64_t post_pio_capture_finished =

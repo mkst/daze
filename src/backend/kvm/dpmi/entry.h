@@ -107,8 +107,8 @@ int daze_kvm_dpmi_entry_continue_to_linear(DazeKvmMachine *machine, uint32_t lin
 int daze_kvm_dpmi_entry_retire_mediator_out(DazeKvmMachine *machine, uint32_t cs_base, uint32_t rip,
                                             DazeKvmDpmiEntryResult *result);
 
-/* Software retirement advances only RIP by two and executes no guest code. No boundary
- * state is captured on success. */
+/* Advance only RIP by two without guest execution or capture. With register sync,
+ * this queues the update for the next run; a detour may replace it with its entry state. */
 int daze_kvm_dpmi_entry_retire_mediator_out_observe(DazeKvmMachine *machine, uint32_t cs_base,
                                                     uint32_t rip, DazeKvmDpmiEntryResult *result);
 
