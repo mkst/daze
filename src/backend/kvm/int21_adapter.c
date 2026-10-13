@@ -5,6 +5,7 @@
 #include "interrupt_vector.h"
 #include "kvm_bytes.h"
 #include "kvm_range.h"
+#include "machine_access.h"
 
 #include <string.h>
 
@@ -138,7 +139,12 @@ static int dispatch_shared_int21_reply(DazeKvmMachine *machine, DazeDosfsFileSer
   DazeInt21KvmGuestMemory guest_memory = {.machine = machine};
   if (machine == NULL) return -1;
 #if defined(__linux__) && (defined(__x86_64__) || defined(__i386__))
-  if (machine->vcpu >= 0 && ioctl(machine->vcpu, KVM_GET_SREGS, &guest_memory.sregs) < 0) {
+  const int captured =
+    machine->vcpu < 0 ||
+    (machine->run != NULL
+       ? daze_kvm_machine_get_sregs(machine, &guest_memory.sregs) == DAZE_KVM_MACHINE_OK
+       : ioctl(machine->vcpu, KVM_GET_SREGS, &guest_memory.sregs) == 0);
+  if (!captured) {
     if (machine->run != NULL) return -1;
     guest_memory.sregs = (struct kvm_sregs){0};
   }

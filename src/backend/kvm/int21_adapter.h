@@ -3,6 +3,8 @@
 
 #include "runner/runner_private.h"
 
+/* Live machines require the segment capture from the current exit, or a refresh
+ * after a raw register install. */
 DazeKvmPreflightBoundaryDisposition daze_kvm_int21_dispatch(
   DazeKvmMachine *machine, DazeDosfsFileService *files, DazeDosProcessState *process_state,
   DazeDosMemory *dos_memory, const uint8_t record[24],
