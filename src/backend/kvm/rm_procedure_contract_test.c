@@ -17,7 +17,7 @@ static int run_case(int kind) {
   const int init = daze_kvm_machine_init(&m, 0x40000);
   if (init == DAZE_KVM_MACHINE_UNAVAILABLE) return 77;
   if (init != DAZE_KVM_MACHINE_OK) return 1;
-  if (kind == 26) m.sync_regs_mask = 0;
+  if (kind == 26 || kind == 28) m.sync_regs_mask = 0;
   uint8_t *guest = m.guest;
   DazeRunMetrics metrics = {.enabled = 1};
   if (kind & 1) m.run_metrics = &metrics;
@@ -174,6 +174,13 @@ static int run_case(int kind) {
   sr.gdt.base = 0x6000;
   sr.gdt.limit = 0x47;
   daze_dpmi_descriptor_encode(guest + 0x6028, 0x2000, 0xffff, 0x9a, 0);
+  if (kind == 27 || kind == 28) {
+    sr.cs.selector = 0x50;
+    sr.gdt.limit = 0x57;
+    daze_dpmi_descriptor_encode(guest + 0x6050, 0x2000, 0xffff, 0x9a, 0);
+    r.rax = 0x12345678;
+    r.rflags = 0x8d7;
+  }
   daze_write_u16(guest + 0x1810c, 0x1357);
   daze_write_u16(guest + 0x1810e, 0x2468);
   if (ioctl(m.vcpu, KVM_SET_SREGS, &sr) < 0 || ioctl(m.vcpu, KVM_SET_REGS, &r) < 0) fail = 1;
@@ -225,7 +232,7 @@ static int run_case(int kind) {
     &successor);
   const int success = kind == 0 || kind == 1 || kind == 6 || kind == 7 || kind == 11 ||
                       (kind >= 13 && kind <= 16) || kind == 23 || kind == 24 || kind == 25 ||
-                      kind == 26;
+                      kind == 26 || kind == 27 || kind == 28;
   if (kind == 2) {
     if (unsetenv("DAZE_KVM_RM_CRASH_DUMP") != 0 || fflush(stderr) != 0 ||
         dup2(saved_stderr, STDERR_FILENO) < 0)
@@ -249,11 +256,15 @@ static int run_case(int kind) {
   if (success) {
     fail |= successor.observation.kind !=
               (kind == 23 ? DAZE_KVM_DPMI_ENTRY_EXIT_DEBUG : DAZE_KVM_DPMI_ENTRY_EXIT_HLT) ||
-            successor.cs != 0x28 || successor.cs_base != 0x2000 ||
+            successor.cs != sr.cs.selector || successor.cs_base != 0x2000 ||
             successor.rip != (kind == 23 ? 0x504 : 0x505) || !(successor.cr0 & 1) ||
             after.rbx != parked.rbx || after.rcx != parked.rcx || after.rsp != parked.rsp ||
             safter.gdt.base != sr.gdt.base ||
             memcmp(frame + DAZE_DPMI_RM_IP, before + DAZE_DPMI_RM_IP, 8) != 0;
+    if (kind == 27 || kind == 28)
+      fail |= after.rax != parked.rax || after.rflags != parked.rflags || after.rdx != parked.rdx ||
+              after.rbp != parked.rbp || memcmp(&safter.ds, &sr.ds, sizeof(sr.ds)) != 0 ||
+              memcmp(&safter.ss, &sr.ss, sizeof(sr.ss)) != 0;
     if (kind == 0 || kind == 1 || kind == 7)
       fail |= (uint16_t)daze_read_u32(frame + DAZE_DPMI_RM_EBX) != (kind == 7 ? 0x1357 : 0x5678) ||
               (uint16_t)daze_read_u32(frame + DAZE_DPMI_RM_ECX) != (kind == 7 ? 0x2468 : 0x9abc);
@@ -309,7 +320,7 @@ static int run_case(int kind) {
   return fail;
 }
 int main(void) {
-  for (int kind = 0; kind < 27; ++kind) {
+  for (int kind = 0; kind < 29; ++kind) {
     int status = run_case(kind);
     if (status) return status;
   }
