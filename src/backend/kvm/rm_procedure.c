@@ -21,6 +21,7 @@
 #if defined(__linux__) && (defined(__x86_64__) || defined(__i386__))
 #include <linux/kvm.h>
 #include <sys/ioctl.h>
+#include "rm_return_code.h"
 
 static void dump_rejected_far_load(DazeKvmMachine *machine, const struct kvm_regs *uregs);
 
@@ -43,6 +44,105 @@ typedef struct {
   struct kvm_regs regs;
   struct kvm_sregs sregs;
 } ParkedState;
+
+static struct kvm_segment protected_code_segment(uint16_t selector, uint32_t base);
+
+static int reloadable_segment(const DazeKvmMachine *machine, const struct kvm_sregs *sregs,
+                              const struct kvm_segment *segment) {
+  if (segment->selector == 0) return segment->unusable;
+  if ((segment->selector & 3) || segment->unusable || !segment->present || !segment->s ||
+      segment->dpl || segment->l || ((segment->type & 8) && !(segment->type & 2)))
+    return 0;
+  const uint32_t offset = segment->selector & ~7u;
+  const int local = segment->selector & 4;
+  const uint64_t base = local ? sregs->ldt.base : sregs->gdt.base;
+  const uint32_t limit = local ? sregs->ldt.limit : sregs->gdt.limit;
+  if ((local && (sregs->ldt.unusable || !sregs->ldt.present)) || offset + 7 > limit ||
+      base > UINT32_MAX || !daze_kvm_range_fits(machine->guest_size, (uint32_t)base + offset, 8) ||
+      base + offset > UINT32_MAX)
+    return 0;
+  const uint8_t *d = (const uint8_t *)machine->guest + base + offset;
+  const uint32_t descriptor_base =
+    daze_read_u16(d + 2) | ((uint32_t)d[4] << 16) | ((uint32_t)d[7] << 24);
+  uint32_t descriptor_limit = daze_read_u16(d) | ((uint32_t)(d[6] & 15) << 16);
+  if (d[6] & 0x80) descriptor_limit = (descriptor_limit << 12) | 0xfff;
+  /* Loading a segment may set its accessed bit; the remaining cache must match. */
+  return descriptor_base == segment->base && descriptor_limit == segment->limit &&
+         (d[5] & 0xfe) == (0x90 | (segment->type & 0xe)) &&
+         (d[6] >> 4) == (segment->avl | (segment->db << 2) | (segment->g << 3));
+}
+
+static int return_bridge_eligible(const DazeKvmMachine *machine, const ParkedState *parked,
+                                  uint32_t frame_address) {
+  const struct kvm_sregs *s = &parked->sregs;
+  const struct kvm_regs *r = &parked->regs;
+  if (r->r8 || r->r9 || r->r10 || r->r11 || r->r12 || r->r13 || r->r14 || r->r15) return 0;
+  if (s->cs.selector != DAZE_SEL_GATE_CODE || (s->cs.type & 0xe) != 0xa ||
+      (s->cr0 & 0x80000001u) != 1 || (r->rflags & ((1u << 8) | (1u << 16) | (1u << 17))) ||
+      r->rsp < 4 || r->rsp > s->ss.limit || (!s->ss.db && r->rsp > UINT16_MAX) ||
+      (s->ss.type & 0xe) != 2 || s->ss.base + r->rsp > machine->guest_size ||
+      s->idt.base > UINT32_MAX || r->rip > s->cs.limit ||
+      !daze_kvm_range_fits(machine->guest_size, frame_address, DAZE_DPMI_RM_FRAME_SIZE) ||
+      daze_guest_ranges_overlap(frame_address, DAZE_DPMI_RM_FRAME_SIZE, k_dpmi_rm_return_bridge,
+                                k_dpmi_rm_return_bridge_size) ||
+      daze_guest_ranges_overlap(frame_address, DAZE_DPMI_RM_FRAME_SIZE,
+                                (uint32_t)(s->ss.base + r->rsp - 4), 4))
+    return 0;
+  const uint64_t values[] = {r->rax, r->rbx, r->rcx,    r->rdx, r->rsi, r->rdi,
+                             r->rbp, r->rsp, r->rflags, r->rip, s->cr0};
+  for (size_t i = 0; i < sizeof(values) / sizeof(values[0]); ++i)
+    if (values[i] > UINT32_MAX) return 0;
+  const struct kvm_segment gate = protected_code_segment(RM_GATE_CS_SELECTOR, RM_GATE_CS_BASE);
+  const struct kvm_segment flat = {.selector = DAZE_SEL_GATE_DATA,
+                                   .limit = UINT32_MAX,
+                                   .type = 3,
+                                   .present = 1,
+                                   .s = 1,
+                                   .db = 1,
+                                   .g = 1};
+  const struct kvm_segment *segments[] = {&s->cs, &s->ss, &s->ds, &s->es,
+                                          &s->fs, &s->gs, &gate,  &flat};
+  for (size_t i = 0; i < sizeof(segments) / sizeof(segments[0]); ++i)
+    if (!reloadable_segment(machine, s, segments[i])) return 0;
+  return 1;
+}
+
+static int install_return_bridge(DazeKvmMachine *machine, const ParkedState *parked,
+                                 uint32_t frame_address) {
+  if (!return_bridge_eligible(machine, parked, frame_address)) return 0;
+  uint8_t state[0x70] = {0};
+  const uint32_t values[] = {(uint32_t)parked->regs.rax,
+                             (uint32_t)parked->regs.rbx,
+                             (uint32_t)parked->regs.rcx,
+                             (uint32_t)parked->regs.rdx,
+                             (uint32_t)parked->regs.rsi,
+                             (uint32_t)parked->regs.rdi,
+                             (uint32_t)parked->regs.rbp,
+                             (uint32_t)parked->regs.rsp,
+                             (uint32_t)parked->regs.rflags,
+                             (uint32_t)parked->sregs.cr0,
+                             frame_address};
+  for (size_t i = 0; i < sizeof(values) / sizeof(values[0]); ++i)
+    daze_write_u32(state + 4 * i, values[i]);
+  const uint16_t selectors[] = {parked->sregs.ds.selector, parked->sregs.es.selector,
+                                parked->sregs.fs.selector, parked->sregs.gs.selector,
+                                parked->sregs.ss.selector};
+  for (size_t i = 0; i < sizeof(selectors) / sizeof(selectors[0]); ++i)
+    daze_write_u16(state + 0x2c + 2 * i, selectors[i]);
+  daze_write_u16(state + 0x36, parked->sregs.idt.limit);
+  daze_write_u32(state + 0x38, (uint32_t)parked->sregs.idt.base);
+  daze_write_u32(state + 0x3c, (uint32_t)parked->regs.rip);
+  daze_write_u16(state + 0x40, parked->sregs.cs.selector);
+  const uint8_t gate[] = {0xea, 0, 0, 0x40, 0x02}; /* jmp far 0240h:0000h */
+  if (!daze_kvm_range_fits(machine->guest_size, k_dpmi_rm_return_bridge,
+                           k_dpmi_rm_return_bridge_size) ||
+      !daze_kvm_machine_write(machine, k_dpmi_rm_return_bridge, rm_return_code,
+                              sizeof(rm_return_code)) ||
+      !daze_kvm_machine_write(machine, k_dpmi_rm_return_bridge + 0x600, state, sizeof(state)) ||
+      !daze_kvm_machine_write(machine, DAZE_DPMI_RM_GATE_LINEAR, gate, sizeof(gate)))
+    return -1;
+  return 1;
+}
 
 static int timed_rm_kvm_run(DazeKvmMachine *machine) {
   DazeRunMetrics *const metrics = machine->run_metrics;
@@ -422,7 +522,7 @@ static int write_back_frame(DazeKvmMachine *machine, uint32_t frame_address,
   return 1;
 }
 
-enum { RMRUN_STOP, RMRUN_COMPLETE };
+enum { RMRUN_STOP, RMRUN_COMPLETE, RMRUN_BRIDGED };
 
 static int returned_to_gate(const struct kvm_regs *regs, const struct kvm_sregs *sregs) {
   /* VMX and SVM retire HLT before KVM_EXIT_HLT; Daze has no in-kernel LAPIC. */
@@ -432,12 +532,20 @@ static int returned_to_gate(const struct kvm_regs *regs, const struct kvm_sregs 
 
 static int reflect_run(DazeKvmMachine *machine, DazeDosfsFileService *files,
                        DazeDosProcessState *process_state, const DazeKvmDpmiMediator *mediator,
-                       uint16_t dpmi_entry_segment) {
+                       uint16_t dpmi_entry_segment, int bridge, DazeKvmDpmiEntryResult *successor) {
   const struct kvm_run *run = (const struct kvm_run *)machine->run;
   for (size_t step = 0; step < RM_MAX_STEPS; ++step) {
     if (timed_rm_kvm_run(machine) < 0) {
       fprintf(stderr, "kvm-rm-procedure: run failed\n");
       return RMRUN_STOP;
+    }
+    if (bridge &&
+        daze_read_u16((const uint8_t *)machine->guest + k_dpmi_rm_return_bridge + 0x642) == 1) {
+      /* The owner loop classifies this actual protected exit, including faults. */
+      return daze_kvm_dpmi_entry_observe_mediator_or_capture(machine, successor) ==
+                 DAZE_KVM_DPMI_ENTRY_OK
+               ? RMRUN_BRIDGED
+               : RMRUN_STOP;
     }
     if (run->exit_reason == KVM_EXIT_HLT) {
       struct kvm_regs regs = {0};
@@ -493,6 +601,13 @@ static int reflect_run(DazeKvmMachine *machine, DazeDosfsFileService *files,
                                   *value)) {
             fprintf(stderr, "kvm-rm-procedure: runner boundary not served\n");
             return RMRUN_STOP;
+          }
+          if (bridge && *value == 0x31) {
+            /* A real-mode DPMI call may change descriptors used by the parked caches. */
+            const uint8_t halt = 0xf4; /* hlt */
+            if (!daze_kvm_machine_write(machine, DAZE_DPMI_RM_GATE_LINEAR, &halt, 1))
+              return RMRUN_STOP;
+            bridge = 0;
           }
           continue;
         }
@@ -662,35 +777,21 @@ int daze_kvm_rm_procedure_reflect(const DazeKvmRmProcedureInput *input,
     fprintf(stderr, "kvm-rm-procedure: cannot enter guest trampoline\n");
     return 0;
   }
+  const int bridge =
+    input->protected_return_linear == 0 &&
+        !daze_guest_ranges_overlap(rm->stack_address, 6 + rm->parameter_bytes,
+                                   k_dpmi_rm_return_bridge, k_dpmi_rm_return_bridge_size)
+      ? install_return_bridge(machine, &post_pio, rm->frame_address)
+      : 0;
+  if (bridge < 0) return 0;
   const uint64_t transition_finished =
     metrics != NULL && metrics->enabled ? monotonic_nanoseconds() : 0;
   const uint64_t reflect_started =
     metrics != NULL && metrics->enabled ? monotonic_nanoseconds() : 0;
   const int status = reflect_run(machine, input->files, input->process_state, input->mediator,
-                                 input->dpmi_entry_segment);
+                                 input->dpmi_entry_segment, bridge, successor);
   const uint64_t reflect_finished =
     metrics != NULL && metrics->enabled ? monotonic_nanoseconds() : 0;
-  int completed = 0;
-  struct kvm_sregs returned;
-  if (status == RMRUN_COMPLETE) completed = write_back_frame(machine, rm->frame_address, &returned);
-  if (completed) {
-    if (prepare_protected_return(machine, &post_pio, &returned) < 0) {
-      fprintf(stderr, "kvm-rm-procedure: cannot prepare protected return\n");
-      return 0;
-    }
-  }
-  /* Restore the immediate successor, before any mailbox load has executed. */
-  if (daze_kvm_machine_set_sregs(machine, &post_pio.sregs) != DAZE_KVM_MACHINE_OK ||
-      daze_kvm_machine_set_regs(machine, &post_pio.regs) != DAZE_KVM_MACHINE_OK)
-    return 0;
-  if (!completed) return 0;
-  const uint64_t resume_started = metrics != NULL && metrics->enabled ? monotonic_nanoseconds() : 0;
-  if (input->protected_return_linear != 0) {
-    struct kvm_guest_debug debug = {.control = KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_USE_HW_BP};
-    debug.arch.debugreg[0] = input->protected_return_linear;
-    debug.arch.debugreg[7] = 3;
-    if (ioctl(machine->vcpu, KVM_SET_GUEST_DEBUG, &debug) < 0) return 0;
-  }
   const uint64_t resume_run_before =
     metrics != NULL && metrics->enabled
       ? metrics->kvm_dpmi_run_nanoseconds[DAZE_RUN_METRICS_DPMI_RUN_CONTINUE_ONCE]
@@ -699,13 +800,40 @@ int daze_kvm_rm_procedure_reflect(const DazeKvmRmProcedureInput *input,
     metrics != NULL && metrics->enabled
       ? metrics->kvm_dpmi_state_capture_nanoseconds[DAZE_RUN_METRICS_DPMI_CAPTURE_CONTINUE_ONCE]
       : 0;
-  const int resumed =
-    daze_kvm_dpmi_entry_continue_mediator_or_capture(machine, successor) == DAZE_KVM_DPMI_ENTRY_OK;
+  uint64_t resume_started = reflect_finished;
+  int resumed = status == RMRUN_BRIDGED;
+  if (!resumed) {
+    int completed = 0;
+    struct kvm_sregs returned;
+    if (status == RMRUN_COMPLETE)
+      completed = write_back_frame(machine, rm->frame_address, &returned);
+    if (completed) {
+      if (prepare_protected_return(machine, &post_pio, &returned) < 0) {
+        fprintf(stderr, "kvm-rm-procedure: cannot prepare protected return\n");
+        return 0;
+      }
+    }
+    /* Restore the immediate successor, before any mailbox load has executed. */
+    if (daze_kvm_machine_set_sregs(machine, &post_pio.sregs) != DAZE_KVM_MACHINE_OK ||
+        daze_kvm_machine_set_regs(machine, &post_pio.regs) != DAZE_KVM_MACHINE_OK)
+      return 0;
+    if (!completed) return 0;
+    resume_started = metrics != NULL && metrics->enabled ? monotonic_nanoseconds() : 0;
+    if (input->protected_return_linear != 0) {
+      struct kvm_guest_debug debug = {.control = KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_USE_HW_BP};
+      debug.arch.debugreg[0] = input->protected_return_linear;
+      debug.arch.debugreg[7] = 3;
+      if (ioctl(machine->vcpu, KVM_SET_GUEST_DEBUG, &debug) < 0) return 0;
+    }
+    resumed = daze_kvm_dpmi_entry_continue_mediator_or_capture(machine, successor) ==
+              DAZE_KVM_DPMI_ENTRY_OK;
+  }
   const uint64_t resume_finished =
     metrics != NULL && metrics->enabled ? monotonic_nanoseconds() : 0;
   if (metrics != NULL && metrics->enabled) {
     const uint64_t finished = monotonic_nanoseconds();
     metrics->kvm_rm_procedure_calls++;
+    if (status == RMRUN_BRIDGED) metrics->kvm_rm_procedure_bridged_calls++;
     metrics->kvm_rm_procedure_nanoseconds += elapsed_nanoseconds(started, finished);
     metrics->kvm_rm_procedure_setup_nanoseconds += elapsed_nanoseconds(started, reflect_started);
     metrics->kvm_rm_procedure_setup_parked_capture_nanoseconds +=

@@ -25,7 +25,7 @@ int main(void) {
     DazeKvmDpmiEntryResult result;
     int (*const continuations[])(DazeKvmMachine *, DazeKvmDpmiEntryResult *) = {
       daze_kvm_dpmi_entry_continue_once, daze_kvm_dpmi_entry_continue_mediator_or_capture,
-      daze_kvm_dpmi_entry_continue_observe};
+      daze_kvm_dpmi_entry_continue_observe, daze_kvm_dpmi_entry_observe_mediator_or_capture};
     if (kind < 4) {
       for (size_t i = 0; i < sizeof(continuations) / sizeof(continuations[0]); ++i) {
         memset(&result, 0xa5, sizeof(result));

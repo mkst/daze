@@ -10,6 +10,156 @@
 #endif
 
 #if defined(__linux__) && (defined(__x86_64__) || defined(__i386__))
+static void return_bridge_contract(void) {
+  uint8_t guest[0x4000] = {0};
+  DazeKvmMachine machine = {.guest = guest, .guest_size = sizeof(guest)};
+  ParkedState parked = {.regs = {.rax = 0x12345678, .rip = 0x1504, .rsp = 0x100, .rflags = 0x87},
+                        .sregs = {.cr0 = 0x11,
+                                  .gdt = {.base = 0x1000, .limit = 0x5f},
+                                  .ldt = {.base = 0x1800, .limit = 0xff, .present = 1},
+                                  .idt = {.base = 0x1900, .limit = 0x7ff}}};
+  parked.sregs.cs = protected_code_segment(DAZE_SEL_GATE_CODE, 0x2000);
+  parked.sregs.ss = (struct kvm_segment){
+    .selector = 0x10, .base = 0x3100, .limit = 0xffff, .type = 3, .present = 1, .s = 1};
+  parked.sregs.ds = parked.sregs.es = parked.sregs.ss;
+  parked.sregs.fs = parked.sregs.ss;
+  parked.sregs.fs.selector = 0x84;
+  parked.sregs.gs.unusable = 1;
+  daze_dpmi_descriptor_encode(guest + 0x1010, 0x3100, 0xffff, 0x92, 0);
+  daze_dpmi_descriptor_encode(guest + 0x1880, 0x3100, 0xffff, 0x93, 0);
+  daze_dpmi_descriptor_encode(guest + 0x1028, 0x2000, 0xffff, 0x9a, 0);
+  daze_dpmi_descriptor_encode(guest + 0x1050, 0x2000, 0xffff, 0x9a, 0);
+  daze_dpmi_descriptor_encode(guest + 0x1058, 0, 0xfffff, 0x92, 12);
+  assert(return_bridge_eligible(&machine, &parked, 0x3400));
+  for (unsigned kind = 0; kind < 36; ++kind) {
+    ParkedState bad = parked;
+    uint32_t address = 0x3400;
+    switch (kind) {
+    case 0:
+      bad.sregs.cs.selector = 8;
+      break;
+    case 1:
+      bad.sregs.cs.type = 3;
+      break;
+    case 2:
+      bad.sregs.cr0 |= 0x80000000u;
+      break;
+    case 3:
+      bad.sregs.cr0 &= ~UINT64_C(1);
+      break;
+    case 4:
+      bad.regs.rflags |= 1u << 8;
+      break;
+    case 5:
+      bad.regs.rflags |= 1u << 16;
+      break;
+    case 6:
+      bad.regs.rflags |= 1u << 17;
+      break;
+    case 7:
+      bad.regs.rsp = 3;
+      break;
+    case 8:
+      bad.sregs.ss.limit = 0xff;
+      break;
+    case 9:
+      bad.sregs.ss.limit = UINT32_MAX;
+      bad.regs.rsp = 0x10000;
+      break;
+    case 10:
+      bad.sregs.ss.type = 7;
+      break;
+    case 11:
+      bad.sregs.ss.base = UINT32_MAX;
+      break;
+    case 12:
+      bad.sregs.idt.base = UINT64_C(1) << 32;
+      break;
+    case 13:
+      bad.regs.rip = 0x10000;
+      break;
+    case 14:
+      address = 0x2400;
+      break;
+    case 15:
+      address = 0x31fc;
+      break;
+    case 16:
+      bad.regs.rax = UINT64_C(1) << 32;
+      break;
+    case 17:
+      bad.sregs.ss.base++;
+      break;
+    case 18:
+      bad.sregs.gdt.limit = 0x57;
+      break;
+    case 19:
+      bad.sregs.ldt.unusable = 1;
+      break;
+    case 20:
+      bad.sregs.ds.present = 0;
+      break;
+    case 21:
+      bad.sregs.ds.dpl = 3;
+      break;
+    case 22:
+      bad.sregs.ds.l = 1;
+      break;
+    case 23:
+      bad.sregs.ds.selector |= 1;
+      break;
+    case 24:
+      bad.sregs.ldt.limit = 0x86;
+      break;
+    case 25:
+      bad.sregs.gdt.base = UINT64_C(1) << 32;
+      break;
+    case 26:
+      bad.sregs.gdt.base = UINT32_MAX - 7;
+      break;
+    case 27:
+      bad.sregs.ds.db = 1;
+      break;
+    case 28:
+      bad.sregs.ds.limit--;
+      break;
+    case 29:
+      bad.sregs.gs.unusable = 0;
+      break;
+    case 30:
+      bad.sregs.ds.s = 0;
+      break;
+    case 31:
+      bad.sregs.ds.unusable = 1;
+      break;
+    case 32:
+      bad.sregs.ldt.present = 0;
+      break;
+    case 33:
+      address = sizeof(guest) - 1;
+      break;
+    case 34:
+      bad.regs.r8 = 1;
+      break;
+    case 35:
+      bad.sregs.ds.type = 9;
+      break;
+    }
+    assert(install_return_bridge(&machine, &bad, address) == 0);
+    assert(guest[0x2300] == 0);
+  }
+  assert(install_return_bridge(&machine, &parked, 0x3400) == 1);
+  assert(sizeof(rm_return_code) == 0x157 && guest[0x2300] == 0xea &&
+         daze_read_u32(guest + 0x2a00) == 0x12345678 && daze_read_u32(guest + 0x2a28) == 0x3400 &&
+         daze_read_u32(guest + 0x2a3c) == 0x1504 && daze_read_u16(guest + 0x2a42) == 0);
+  parked.sregs.ss.base = 0x2000;
+  parked.sregs.ds.base = parked.sregs.es.base = parked.sregs.fs.base = 0x2000;
+  daze_dpmi_descriptor_encode(guest + 0x1010, 0x2000, 0xffff, 0x92, 0);
+  daze_dpmi_descriptor_encode(guest + 0x1880, 0x2000, 0xffff, 0x93, 0);
+  machine.guest_size = 0x2eff;
+  assert(install_return_bridge(&machine, &parked, 0x2200) == -1);
+}
+
 static void protected_return_contract(void) {
   uint8_t guest[0x2400] = {0};
   DazeKvmMachine machine = {.guest = guest, .guest_size = sizeof(guest)};
@@ -229,7 +379,7 @@ static void input_and_metrics_contract(void) {
   assert(!serve_runner(&machine, &files, NULL, &mediator, 0x200, 0x21));
   struct kvm_sregs returned_sregs;
   assert(!write_back_frame(&machine, 0x100, &returned_sregs));
-  assert(reflect_run(&machine, &files, NULL, &mediator, 0x200) == RMRUN_STOP);
+  assert(reflect_run(&machine, &files, NULL, &mediator, 0x200, 0, &successor) == RMRUN_STOP);
   dump_rejected_far_load(&machine, &(struct kvm_regs){.rip = 0x1234});
   DazeRunMetrics metrics = {0};
   record_reflect_runner(NULL, 0x21, 10);
@@ -273,6 +423,7 @@ static void input_and_metrics_contract(void) {
 }
 
 int main(void) {
+  return_bridge_contract();
   protected_return_contract();
   descriptor_reply_contract();
   input_and_metrics_contract();

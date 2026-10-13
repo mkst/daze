@@ -32,6 +32,8 @@ enum {
   k_dpmi_rm_target_linear = 0x2160,
   k_dpmi_rm_gate_linear = 0x2300,
   k_dpmi_rm_gate_segment = 0x0230,
+  k_dpmi_rm_return_bridge = 0x2400,
+  k_dpmi_rm_return_bridge_size = 0xb00,
   k_bios_config_table = 0x1f100,
   k_pm_reentry_wrapper = 0x2180,
   k_pm_reentry_state = 0x2200,
@@ -114,6 +116,7 @@ typedef enum {
   DAZE_GUEST_OWNER_KVM_RUNNER_GATE_ARENA,
   DAZE_GUEST_OWNER_KVM_RUNNER_RECORD,
   DAZE_GUEST_OWNER_KVM_RUNNER_MAILBOX,
+  DAZE_GUEST_OWNER_KVM_RM_RETURN_BRIDGE,
   DAZE_GUEST_OWNER_COUNT,
   DAZE_GUEST_OWNER_NONE = DAZE_GUEST_OWNER_COUNT,
 } DazeGuestOwner;
@@ -126,7 +129,7 @@ typedef struct {
 
 enum { DAZE_GUEST_LAYOUT_MAX_RANGES = 20 };
 
-enum { DAZE_GUEST_LAYOUT_STABLE_COUNT = 10 };
+enum { DAZE_GUEST_LAYOUT_STABLE_COUNT = 11 };
 
 typedef struct {
   DazeGuestRange ranges[DAZE_GUEST_LAYOUT_MAX_RANGES];

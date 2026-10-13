@@ -311,6 +311,11 @@ void daze_metrics_report_run(const DazeRunMetrics *metrics) {
                 (double)metrics->kvm_rm_procedure_reflect_nanoseconds / 1000000.0,
                 (double)metrics->kvm_rm_procedure_cleanup_nanoseconds / 1000000.0,
                 (double)metrics->kvm_rm_procedure_resume_nanoseconds / 1000000.0);
+        if (metrics->kvm_rm_procedure_bridged_calls != 0)
+          fprintf(stderr,
+                  "metrics: kvm-rm-procedure-bridged=%" PRIu64
+                  " (reflect includes protected execution to next exit)\n",
+                  metrics->kvm_rm_procedure_bridged_calls);
         fprintf(stderr,
                 "metrics: kvm-rm-procedure-setup parked-capture=%.3fms retire=%.3fms "
                 "post-pio-capture=%.3fms transition=%.3fms other=%.3fms\n",

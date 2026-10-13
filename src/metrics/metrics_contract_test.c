@@ -223,6 +223,7 @@ static void reporting(void) {
   run.kvm_dpmi_function_overflow_calls = 4;
   run.kvm_virtual_interrupt_site_overflow_calls = 5;
   run.kvm_rm_procedure_calls = 1;
+  run.kvm_rm_procedure_bridged_calls = 1;
   run.kvm_rm_procedure_nanoseconds = 10000000;
   run.kvm_rm_procedure_setup_nanoseconds = 6000000;
   run.kvm_rm_procedure_setup_parked_capture_nanoseconds = 1000000;
@@ -248,6 +249,7 @@ static void reporting(void) {
   lacks("kvm-rm-procedure-cost time-2ch");
   lacks("kvm-guest-virtual-interrupts");
   has("kvm-rm-procedure total=1/10.000ms/10000.0us KVM_RUN=0/0.000ms/0.0us");
+  has("kvm-rm-procedure-bridged=1 (reflect includes protected execution to next exit)");
   has("transition=0.000ms other=5.000ms");
   lacks("debug-arm=");
   has("kvm-rm-procedure-resume KVM_RUN=0.000ms capture=1.000ms other=2.000ms");

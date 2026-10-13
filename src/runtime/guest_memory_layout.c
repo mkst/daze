@@ -24,6 +24,7 @@ static const char *const k_owner_names[DAZE_GUEST_OWNER_COUNT] = {
   "KVM runner gate arena",
   "KVM runner record",
   "KVM runner mailbox",
+  "KVM RM return bridge",
 };
 
 const char *daze_guest_owner_name(DazeGuestOwner owner) {
@@ -54,6 +55,7 @@ int daze_guest_owner_persistent(DazeGuestOwner owner) {
   case DAZE_GUEST_OWNER_KVM_RUNNER_GATE_ARENA:
   case DAZE_GUEST_OWNER_KVM_RUNNER_RECORD:
   case DAZE_GUEST_OWNER_KVM_RUNNER_MAILBOX:
+  case DAZE_GUEST_OWNER_KVM_RM_RETURN_BRIDGE:
     return 1;
   case DAZE_GUEST_OWNER_IMAGE:
   case DAZE_GUEST_OWNER_DOS_VECTOR_GATE:
@@ -104,7 +106,9 @@ int daze_guest_layout_add_stable(DazeGuestLayout *layout) {
          add_range(layout, k_dpmi_ldt_address, DAZE_DPMI_TRANSITION_LDT_SIZE,
                    DAZE_GUEST_OWNER_DPMI_LDT) &&
          add_range(layout, k_dpmi_exception_locked_stack_base, k_dpmi_exception_locked_stack_size,
-                   DAZE_GUEST_OWNER_DPMI_LOCKED_STACK);
+                   DAZE_GUEST_OWNER_DPMI_LOCKED_STACK) &&
+         add_range(layout, k_dpmi_rm_return_bridge, k_dpmi_rm_return_bridge_size,
+                   DAZE_GUEST_OWNER_KVM_RM_RETURN_BRIDGE);
 }
 
 int daze_guest_layout_add_image(DazeGuestLayout *layout, uint32_t image_address,

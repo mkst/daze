@@ -4,6 +4,13 @@
 counters. `--debug` adds service and loader messages. These controls are
 independent of instruction tracing.
 
+`kvm-rm-procedure-bridged` counts callbacks whose guest return stub resumes the
+protected caller without an intermediate userspace exit. For these callbacks,
+`reflect` and its `KVM_RUN` time include protected execution to the next exit;
+they do not isolate real-mode callback overhead. Descriptor-cache mismatches,
+real-mode DPMI services and protected-return breakpoints retain the host return
+path. Callback phase timers are nested, so do not add them to KVM_RUN totals.
+
 Normal execution has no cumulative limit on serviced DOS/DPMI boundaries or
 backend continuations. Bounded diagnostic records do not limit command size.
 Unicorn retains its per-emulation instruction guard. To bound elapsed time,
