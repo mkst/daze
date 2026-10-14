@@ -25,7 +25,7 @@ int daze_kvm_rm_entry_install(DazeKvmMachine *machine, uint32_t epilogue) {
   if (epilogue == 0) return 1;
   _Static_assert(sizeof(native_entry_code) <= DAZE_KVM_RM_ENTRY_CONTROL - DAZE_KVM_RM_ENTRY_LINEAR,
                  "entry code stays below control state");
-  _Static_assert(sizeof(native_low_code) <= 0x2a00 - DAZE_KVM_RM_ENTRY_LOW_LINEAR,
+  _Static_assert(sizeof(native_low_code) <= DAZE_KVM_RM_ENTRY_PARKED - DAZE_KVM_RM_ENTRY_LOW_LINEAR,
                  "low entry code stays below parked state");
   uint8_t control[DAZE_KVM_RM_ENTRY_CONTROL_SIZE] = {0};
   daze_write_u32(control + 0x30, epilogue);
@@ -74,7 +74,7 @@ static void native_arm(DazeKvmMachine *machine, const ParkedState *parked, uint3
   const struct kvm_sregs *s = &parked->sregs;
   uint8_t *guest = machine->guest;
   if (daze_read_u32(guest + 0x5830) == 0) return;
-  daze_write_u32(guest + 0x5800, 0);
+  daze_write_u32(guest + DAZE_KVM_RM_ENTRY_CONTROL, 0);
   if (s->cs.base != 0 || !s->cs.db || s->gdt.base != k_dpmi_gdt_address || s->gdt.limit != 0xffff ||
       s->ldt.base != k_dpmi_ldt_address || s->ldt.limit != 0xffff ||
       s->ss.selector != DAZE_SEL_DATA || s->ss.db || s->ss.limit != 0xffff ||
@@ -115,7 +115,7 @@ static void native_arm(DazeKvmMachine *machine, const ParkedState *parked, uint3
   daze_write_u16(guest + 0x585c, s->idt.limit);
   daze_write_u32(guest + 0x585e, (uint32_t)s->idt.base);
   daze_write_u32(guest + 0x5864, (uint32_t)s->cr0);
-  daze_write_u32(guest + 0x5800, 1);
+  daze_write_u32(guest + DAZE_KVM_RM_ENTRY_CONTROL, 1);
 }
 
 static int reloadable_segment(const DazeKvmMachine *machine, const struct kvm_sregs *sregs,
@@ -768,7 +768,7 @@ static int native_parked(DazeKvmMachine *machine, ParkedState *parked) {
   const uint8_t *guest = machine->guest;
   memcpy(&parked->sregs, guest + DAZE_KVM_RM_ENTRY_CONTROL + 0x100, sizeof(parked->sregs));
   if (daze_kvm_machine_get_regs(machine, &parked->regs) != DAZE_KVM_MACHINE_OK) return 0;
-  const uint8_t *p = guest + 0x2a00;
+  const uint8_t *p = guest + DAZE_KVM_RM_ENTRY_PARKED;
   parked->regs.rax = daze_read_u32(p);
   parked->regs.rbx = daze_read_u32(p + 4);
   parked->regs.rcx = daze_read_u32(p + 8);
@@ -786,7 +786,8 @@ static int native_parked(DazeKvmMachine *machine, ParkedState *parked) {
 static int native_host_return(DazeKvmMachine *machine, DazeKvmDpmiEntryResult *successor) {
   ParkedState parked;
   struct kvm_sregs returned;
-  const uint32_t frame = daze_read_u32((const uint8_t *)machine->guest + 0x2a28);
+  const uint32_t frame =
+    daze_read_u32((const uint8_t *)machine->guest + DAZE_KVM_RM_ENTRY_PARKED + 0x28);
   if (!native_parked(machine, &parked) ||
       !daze_kvm_range_fits(machine->guest_size, frame, DAZE_DPMI_RM_FRAME_SIZE) ||
       !write_back_frame(machine, frame, &returned) ||
@@ -794,7 +795,8 @@ static int native_host_return(DazeKvmMachine *machine, DazeKvmDpmiEntryResult *s
       daze_kvm_machine_set_sregs(machine, &parked.sregs) != DAZE_KVM_MACHINE_OK ||
       daze_kvm_machine_set_regs(machine, &parked.regs) != DAZE_KVM_MACHINE_OK)
     return 0;
-  daze_write_u32((uint8_t *)machine->guest + 0x5840, 0);
+  daze_write_u32(
+    (uint8_t *)machine->guest + DAZE_KVM_RM_ENTRY_CONTROL + DAZE_KVM_RM_ENTRY_ACTIVE_OFFSET, 0);
   return daze_kvm_dpmi_entry_continue_mediator_or_capture(machine, successor) ==
          DAZE_KVM_DPMI_ENTRY_OK;
 }
@@ -931,7 +933,8 @@ int daze_kvm_rm_procedure_reflect(const DazeKvmRmProcedureInput *input,
   if (bridge < 0) return 0;
   if (daze_kvm_rm_entry_installed(machine)) {
     daze_kvm_rm_entry_invalidate(machine);
-    daze_write_u32((uint8_t *)machine->guest + 0x5840, 0);
+    daze_write_u32(
+      (uint8_t *)machine->guest + DAZE_KVM_RM_ENTRY_CONTROL + DAZE_KVM_RM_ENTRY_ACTIVE_OFFSET, 0);
     if (bridge == 1 && input->protected_return_linear == 0)
       native_arm(machine, &post_pio, rm->frame_address);
   }

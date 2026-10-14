@@ -22,6 +22,7 @@ enum {
   k_dos_dbcs_table_segment = 0x0600,
   k_dpmi_entry_segment = 0x0200,
   k_dos_int21_vector_segment = 0x0300,
+  k_dos_int21_vector_linear = k_dos_int21_vector_segment * 16,
   /* InDOS storage must remain clear of the INT 21h and IRET stubs. */
   k_dos_sda_offset = 0x001f,
   k_dos_indos_offset = 0x0020,

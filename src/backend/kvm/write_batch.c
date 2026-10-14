@@ -59,7 +59,7 @@ void daze_kvm_write_batch_arm(DazeKvmMachine *machine, DazeDosfsFileService *fil
 #if defined(__linux__) && (defined(__x86_64__) || defined(__i386__))
   if (machine == NULL || files == NULL || record == NULL || reply == NULL ||
       machine->guest_size != k_memory_size || !daze_kvm_rm_entry_active(machine) ||
-      daze_read_u16((const uint8_t *)machine->guest + 0x2a42) != 0 ||
+      daze_read_u16((const uint8_t *)machine->guest + DAZE_KVM_RM_ENTRY_PARKED + 0x42) != 0 ||
       daze_read_u16(record + 16) != 0x21 || (daze_read_u16(record) >> 8) != 0x40 ||
       (daze_read_u16(reply + 14) & 1) || daze_read_u16(reply) != daze_read_u16(record + 4) ||
       daze_read_u16(record + 4) == 0 || daze_kvm_write_batch_pending(machine))
@@ -79,8 +79,8 @@ void daze_kvm_write_batch_arm(DazeKvmMachine *machine, DazeDosfsFileService *fil
   uint8_t *const guest = machine->guest;
   if (!machine->write_batch_installed) {
     const uint8_t gate[] = {0x50, 0xb0, 0x21, 0xe6, 0xf4, 0x58, 0xcf};
-    if (segments.cs.base != (uint32_t)k_dos_int21_vector_segment * 16 || regs.rip != 3 ||
-        memcmp(guest + 0x3000, gate, sizeof(gate)) != 0)
+    if (segments.cs.base != (uint32_t)k_dos_int21_vector_linear || regs.rip != 3 ||
+        memcmp(guest + k_dos_int21_vector_linear, gate, sizeof(gate)) != 0)
       return;
     _Static_assert(sizeof(write_batch_code) <= k_kvm_write_batch_control - k_kvm_write_batch_code,
                    "write helper stays below control state");
@@ -88,9 +88,9 @@ void daze_kvm_write_batch_arm(DazeKvmMachine *machine, DazeDosfsFileService *fil
     memset(guest + k_kvm_write_batch_control, 0, 0x40);
     /* KVM completes the pending OUT on re-entry; retain it and its pop/IRET successor. */
     const uint8_t jump[] = {0xea, 0, 0, 0x40, 0x07}; /* jmp far 0740h:0000h */
-    memcpy(guest + 0x3007, jump, sizeof(jump));
-    guest[0x3000] = 0xeb; /* jmp short +5 */
-    guest[0x3001] = 5;
+    memcpy(guest + k_dos_int21_vector_linear + 7, jump, sizeof(jump));
+    guest[k_dos_int21_vector_linear] = 0xeb; /* jmp short +5 */
+    guest[k_dos_int21_vector_linear + 1] = 5;
     machine->write_batch_installed = 1;
   }
   uint8_t *const control = guest + k_kvm_write_batch_control;

@@ -11,26 +11,32 @@ enum {
   DAZE_KVM_RM_ENTRY_LOW_LINEAR = 0x2720,
   DAZE_KVM_RM_ENTRY_CONTROL = 0x5800,
   DAZE_KVM_RM_ENTRY_CONTROL_SIZE = 0x800,
+  DAZE_KVM_RM_ENTRY_ACTIVE_OFFSET = 0x40,
+  DAZE_KVM_RM_ENTRY_COUNT_OFFSET = 0x44,
+  DAZE_KVM_RM_ENTRY_SIGNATURE_OFFSET = 0x68,
   DAZE_KVM_RM_ENTRY_SIGNATURE = 0x44524d45,
+  DAZE_KVM_RM_ENTRY_PARKED = 0x2a00,
 };
 
 static inline int daze_kvm_rm_entry_installed(const DazeKvmMachine *machine) {
   return machine != NULL && machine->guest != NULL &&
          daze_kvm_range_fits(machine->guest_size, DAZE_KVM_RM_ENTRY_CONTROL,
                              DAZE_KVM_RM_ENTRY_CONTROL_SIZE) &&
-         daze_read_u32((const uint8_t *)machine->guest + DAZE_KVM_RM_ENTRY_CONTROL + 0x68) ==
-           DAZE_KVM_RM_ENTRY_SIGNATURE;
+         daze_read_u32((const uint8_t *)machine->guest + DAZE_KVM_RM_ENTRY_CONTROL +
+                       DAZE_KVM_RM_ENTRY_SIGNATURE_OFFSET) == DAZE_KVM_RM_ENTRY_SIGNATURE;
 }
 
 static inline uint32_t daze_kvm_rm_entry_count(const DazeKvmMachine *machine) {
   return daze_kvm_rm_entry_installed(machine)
-           ? daze_read_u32((const uint8_t *)machine->guest + DAZE_KVM_RM_ENTRY_CONTROL + 0x44)
+           ? daze_read_u32((const uint8_t *)machine->guest + DAZE_KVM_RM_ENTRY_CONTROL +
+                           DAZE_KVM_RM_ENTRY_COUNT_OFFSET)
            : 0;
 }
 
 static inline int daze_kvm_rm_entry_active(const DazeKvmMachine *machine) {
   return daze_kvm_rm_entry_installed(machine) &&
-         daze_read_u32((const uint8_t *)machine->guest + DAZE_KVM_RM_ENTRY_CONTROL + 0x40) == 1;
+         daze_read_u32((const uint8_t *)machine->guest + DAZE_KVM_RM_ENTRY_CONTROL +
+                       DAZE_KVM_RM_ENTRY_ACTIVE_OFFSET) == 1;
 }
 
 static inline void daze_kvm_rm_entry_invalidate(DazeKvmMachine *machine) {
@@ -42,7 +48,8 @@ static inline void daze_kvm_rm_entry_sync_metrics(DazeKvmMachine *machine) {
   if (machine != NULL && machine->run_metrics != NULL && machine->run_metrics->enabled) {
     machine->run_metrics->kvm_rm_procedure_native_calls += daze_kvm_rm_entry_count(machine);
     if (daze_kvm_rm_entry_installed(machine))
-      daze_write_u32((uint8_t *)machine->guest + DAZE_KVM_RM_ENTRY_CONTROL + 0x44, 0);
+      daze_write_u32(
+        (uint8_t *)machine->guest + DAZE_KVM_RM_ENTRY_CONTROL + DAZE_KVM_RM_ENTRY_COUNT_OFFSET, 0);
   }
 }
 
