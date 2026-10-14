@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-/* Generated from write_batch.S with tools/generate_kvm_write_batch.py. */
+/* Generated from write_batch.S with tools/generate_kvm_code.py. */
 
 static const uint8_t write_batch_code[] = {
   0x80, 0xfc, 0x40,                         /* cmp    ah,0x40 */

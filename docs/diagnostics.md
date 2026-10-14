@@ -18,15 +18,16 @@ timers may include several subsequent native callbacks before the next
 protected exit. Guard rejections use the host entry path; real-mode DPMI
 services retain the host return path and its saved segment caches.
 
-The helper source is `src/backend/kvm/rm_entry.S`. Its checked-in C arrays
-allow normal builds without an assembler. To regenerate them with GNU
-binutils:
+The `rm_entry.S` and `write_batch.S` helper sources are kept as checked-in C
+byte arrays so normal builds need no assembler. Regenerate them with GNU
+binutils, passing the helper name to select its section table:
 
 ```sh
-python3 tools/generate_kvm_rm_entry.py | .venv/bin/clang-format > /tmp/rm_entry_code.h
+python3 tools/generate_kvm_code.py rm_entry | .venv/bin/clang-format > src/backend/kvm/rm_entry_code.h
+python3 tools/generate_kvm_code.py write_batch | .venv/bin/clang-format > src/backend/kvm/write_batch_code.h
 ```
 
-Apply that output to `src/backend/kvm/rm_entry_code.h` when changing the helper.
+Commit each regenerated header alongside its helper `.S` change.
 
 Normal execution has no cumulative limit on serviced DOS/DPMI boundaries or
 backend continuations. Bounded diagnostic records do not limit command size.
@@ -51,14 +52,7 @@ contexts and writes exceeding available credit use the host service.
 file-write totals; `kvm-guest-writes` reports requests and bytes handled in
 the guest, while broker counts report actual host crossings.
 
-The helper source is `src/backend/kvm/write_batch.S`. Regenerate its portable
-C arrays with GNU binutils:
-
-```sh
-python3 tools/generate_kvm_write_batch.py | .venv/bin/clang-format > /tmp/write_batch_code.h
-```
-
-Apply that output to `src/backend/kvm/write_batch_code.h` when changing the helper.
+The write helper's checked-in C arrays are regenerated as described above.
 
 Reads, seeks, metadata access and close flush pending data. Duplicate and
 inherited handles share the buffer; independently opened handles to the same

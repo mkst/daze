@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-/* Generated from rm_entry.S with tools/generate_kvm_rm_entry.py. */
+/* Generated from rm_entry.S with tools/generate_kvm_code.py. */
 
 static const uint8_t native_entry_code[] = {
   0x64, 0xa3, 0x00, 0x2a, 0x00, 0x00,             /* mov    fs:0x2a00,eax */
