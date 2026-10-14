@@ -557,7 +557,7 @@ if(BUILD_TESTING)
   target_link_libraries(kvm_write_batch_execution_contract_test PRIVATE daze_kvm_runner)
   add_test(NAME kvm-write-batch-execution-contract COMMAND kvm_write_batch_execution_contract_test)
   set_tests_properties(kvm-write-batch-execution-contract PROPERTIES
-    LABELS "contract;local;requires-kvm" SKIP_RETURN_CODE 77 TIMEOUT 10)
+    SKIP_RETURN_CODE 77 TIMEOUT 10)
 endif()
 
 add_library(daze_kvm_runner STATIC
@@ -605,7 +605,7 @@ if(BUILD_TESTING)
   daze_configure_c11_pedantic_target(kvm_virtual_interrupt_contract_test PRIVATE)
   target_link_libraries(kvm_virtual_interrupt_contract_test PRIVATE daze_kvm_protected_gate daze_kvm_child_context)
   add_test(NAME kvm-virtual-interrupt-contract COMMAND kvm_virtual_interrupt_contract_test)
-  set_tests_properties(kvm-virtual-interrupt-contract PROPERTIES SKIP_RETURN_CODE 77)
+  set_tests_properties(kvm-virtual-interrupt-contract PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 10)
   daze_configure_c11_pedantic_target(kvm_dpmi_entry_contract_test PRIVATE)
   target_link_libraries(kvm_dpmi_entry_contract_test PRIVATE daze_kvm_dpmi_entry daze_kvm_protected_gate)
   add_executable(kvm_entry_observation_contract_test backend/kvm/dpmi/entry_observation_contract_test.c)

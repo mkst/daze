@@ -19,9 +19,11 @@
     }                                                                                              \
   } while (0)
 
-static void run_case(unsigned width, int initial, int sync) {
+static int run_case(unsigned width, int initial, int sync) {
   DazeKvmMachine m = {0};
-  CHECK(daze_kvm_machine_init(&m, 0x10000) == DAZE_KVM_MACHINE_OK);
+  const int status = daze_kvm_machine_init(&m, 0x10000);
+  if (status == DAZE_KVM_MACHINE_UNAVAILABLE) return 77;
+  CHECK(status == DAZE_KVM_MACHINE_OK);
   DazeRunMetrics metrics = {.enabled = 1};
   m.run_metrics = &metrics;
   if (!sync) m.sync_regs_mask = 0;
@@ -186,14 +188,18 @@ static void run_case(unsigned width, int initial, int sync) {
         metrics.kvm_guest_virtual_interrupt_calls[1] == 2);
   daze_dos_process_state_dispose(&dos);
   daze_kvm_machine_destroy(&m);
+  return 0;
 }
 
 int main(void) {
   for (unsigned w = 0; w < 2; w++)
     for (int i = 0; i < 2; i++)
-      for (int s = 0; s < 2; s++)
-        run_case(w ? 0x8e : 0x86, i, s);
+      for (int s = 0; s < 2; s++) {
+        const int result = run_case(w ? 0x8e : 0x86, i, s);
+        if (result != 0) return result;
+      }
   puts("virtual interrupt contracts: eight cases passed");
+  return 0;
 }
 
 #else
