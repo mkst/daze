@@ -117,6 +117,7 @@ typedef struct {
    * are separate from the protected-mode DPMI entry helpers above. */
   uint64_t kvm_rm_procedure_calls;
   uint64_t kvm_rm_procedure_native_calls;
+  uint64_t kvm_guest_write_calls, kvm_guest_write_bytes, kvm_guest_write_drains;
   uint64_t kvm_rm_procedure_bridged_calls;
   uint64_t kvm_rm_procedure_nanoseconds;
   uint64_t kvm_rm_procedure_run_calls;

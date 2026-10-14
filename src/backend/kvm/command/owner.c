@@ -23,6 +23,7 @@
 #include <string.h>
 
 #include "rm_entry.h"
+#include "write_batch.h"
 
 static int continue_from_handoff(DazeKvmCommandOwnerHandoff *handoff,
                                  const DazeKvmCommandOwnerInput *input,
@@ -968,6 +969,8 @@ dispatch_boundaries(DazeKvmCommandOwnerHandoff *handoff, const DazeKvmCommandOwn
     initial_boundary != NULL ? *initial_boundary : result->protected_gate.terminal;
   int first_boundary = 1;
   for (;;) {
+    if (!daze_kvm_write_batch_drain(machine, input->preflight.process.files))
+      return DAZE_KVM_COMMAND_OWNER_POSTSTART_FAILED;
     daze_kvm_rm_entry_sync_metrics(machine);
     if (gate->rm_entry_address && daze_kvm_rm_entry_active(machine) &&
         daze_read_u16((const uint8_t *)machine->guest + 0x2a42) == 0 && !(boundary.cr0 & 1)) {
@@ -1610,6 +1613,8 @@ static int continue_from_handoff(DazeKvmCommandOwnerHandoff *handoff,
     daze_kvm_transition_plan_report(&plan_input, &plan_failure);
   result->disposition = DAZE_KVM_COMMAND_OWNER_POSTSTART_FAILED;
 out:
+  if (!daze_kvm_write_batch_drain(&machine, input->preflight.process.files))
+    result->disposition = DAZE_KVM_COMMAND_OWNER_POSTSTART_FAILED;
 #undef process_state
 #undef dos_memory
 #undef machine
@@ -1713,6 +1718,7 @@ int daze_kvm_command_owner_start_exec(DazeKvmCommandOwnerHandoff *handoff,
 
 void daze_kvm_command_owner_handoff_destroy(DazeKvmCommandOwnerHandoff *handoff) {
   if (handoff == NULL || !handoff->active) return;
+  (void)daze_kvm_write_batch_drain(&handoff->machine, handoff->process.files);
   daze_dosfs_exec_handles_dispose(&handoff->child_handles);
   daze_kvm_child_context_dispose(&handoff->child);
   daze_kvm_resident_gdt_state_dispose(&handoff->resident_gdt);

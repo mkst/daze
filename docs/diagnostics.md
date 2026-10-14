@@ -43,6 +43,23 @@ environment variable `DAZE_BUFFERED_WRITES=0` to use immediate writes:
 DAZE_BUFFERED_WRITES=0 ./build/debug/daze --backend kvm --mount "$work_dir" TOOL.EXE
 ```
 
+KVM can also batch real-mode DOS writes inside eligible native callbacks.
+Guest bytes use only the unused capacity of the existing 16 KiB buffer;
+they are drained before host operations and lifecycle changes. Unsupported
+contexts and writes exceeding available credit use the host service.
+`DAZE_BUFFERED_WRITES=0` disables this path as well. Metrics retain logical
+file-write totals; `kvm-guest-writes` reports requests and bytes handled in
+the guest, while broker counts report actual host crossings.
+
+The helper source is `src/backend/kvm/write_batch.S`. Regenerate its portable
+C arrays with GNU binutils:
+
+```sh
+python3 tools/generate_kvm_write_batch.py | .venv/bin/clang-format > /tmp/write_batch_code.h
+```
+
+Apply that output to `src/backend/kvm/write_batch_code.h` when changing the helper.
+
 Reads, seeks, metadata access and close flush pending data. Duplicate and
 inherited handles share the buffer; independently opened handles to the same
 file disable buffering for that file. Host standard streams and devices remain

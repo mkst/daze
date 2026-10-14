@@ -311,6 +311,10 @@ void daze_metrics_report_run(const DazeRunMetrics *metrics) {
                 (double)metrics->kvm_rm_procedure_reflect_nanoseconds / 1000000.0,
                 (double)metrics->kvm_rm_procedure_cleanup_nanoseconds / 1000000.0,
                 (double)metrics->kvm_rm_procedure_resume_nanoseconds / 1000000.0);
+        if (metrics->kvm_guest_write_calls != 0)
+          fprintf(stderr, "metrics: kvm-guest-writes=%" PRIu64 "/%" PRIu64 "B drains=%" PRIu64 "\n",
+                  metrics->kvm_guest_write_calls, metrics->kvm_guest_write_bytes,
+                  metrics->kvm_guest_write_drains);
         if (metrics->kvm_rm_procedure_native_calls != 0)
           fprintf(stderr,
                   "metrics: kvm-rm-procedure-native=%" PRIu64
