@@ -543,6 +543,23 @@ if(BUILD_TESTING)
 endif()
 
 
+add_library(daze_kvm_write_batch STATIC backend/kvm/write_batch.c)
+daze_configure_c11_pedantic_target(daze_kvm_write_batch PUBLIC)
+target_link_libraries(daze_kvm_write_batch PUBLIC daze_kvm_machine daze_dosfs daze_guest_memory_layout)
+
+if(BUILD_TESTING)
+  add_executable(kvm_write_batch_contract_test backend/kvm/write_batch_contract_test.c)
+  daze_configure_c11_pedantic_target(kvm_write_batch_contract_test PRIVATE)
+  target_link_libraries(kvm_write_batch_contract_test PRIVATE daze_dosfs daze_guest_memory_layout)
+  daze_register_simple_contract_test(kvm-write-batch-contract kvm_write_batch_contract_test)
+  add_executable(kvm_write_batch_execution_contract_test backend/kvm/write_batch_execution_contract_test.c)
+  daze_configure_c11_pedantic_target(kvm_write_batch_execution_contract_test PRIVATE)
+  target_link_libraries(kvm_write_batch_execution_contract_test PRIVATE daze_kvm_runner)
+  add_test(NAME kvm-write-batch-execution-contract COMMAND kvm_write_batch_execution_contract_test)
+  set_tests_properties(kvm-write-batch-execution-contract PROPERTIES
+    LABELS "contract;local;requires-kvm" SKIP_RETURN_CODE 77 TIMEOUT 10)
+endif()
+
 add_library(daze_kvm_runner STATIC
   backend/kvm/runner/runner.c
   backend/kvm/int21_adapter.c
@@ -564,7 +581,7 @@ add_library(daze_kvm_runner STATIC
 )
 daze_configure_c11_pedantic_target(daze_kvm_runner PUBLIC)
 target_link_libraries(daze_kvm_runner PUBLIC
-  daze_kvm_machine daze_kvm_runner_gate_resume daze_dos_int21_service daze_dosfs daze_dos_memory daze_mz_layout daze_kvm_process_layout daze_guest_memory_layout
+  daze_kvm_write_batch daze_kvm_machine daze_kvm_runner_gate_resume daze_dos_int21_service daze_dosfs daze_dos_memory daze_mz_layout daze_kvm_process_layout daze_guest_memory_layout
 )
 
 if(BUILD_TESTING AND DAZE_HAS_UNICORN)
@@ -955,7 +972,7 @@ add_library(daze_kvm_rm_procedure STATIC backend/kvm/rm_procedure.c)
 daze_configure_c11_pedantic_target(daze_kvm_rm_procedure PUBLIC)
 target_link_libraries(daze_kvm_rm_procedure PUBLIC
   daze_kvm_machine daze_kvm_dpmi_entry daze_kvm_dpmi_mediator daze_kvm_runner_gate_resume
-  daze_dpmi_request daze_dpmi_descriptor
+  daze_dpmi_request daze_dpmi_descriptor daze_kvm_write_batch
 )
 
 add_library(daze_kvm_state_save_gate STATIC backend/kvm/gate/state_save.c)

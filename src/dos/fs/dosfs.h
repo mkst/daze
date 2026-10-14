@@ -131,6 +131,11 @@ DazeDosfsStatus daze_dosfs_handles_get(const DazeDosfsHandles *handles, uint16_t
 DazeDosfsStatus daze_dosfs_handles_peek(const DazeDosfsHandles *handles, uint16_t dos_handle,
                                         int *host_fd);
 DazeDosfsStatus daze_dosfs_handles_flush(const DazeDosfsHandles *handles, int *host_errno);
+/* Credit is valid until the next host handle operation. Appending within credit
+ * cannot flush or perform I/O; the caller must drain guest bytes before that operation. */
+uint16_t daze_dosfs_handles_write_credit(const DazeDosfsHandles *handles, uint16_t handle);
+int daze_dosfs_handles_append_buffered(DazeDosfsHandles *handles, uint16_t handle,
+                                       const uint8_t *bytes, uint16_t count);
 ssize_t daze_dosfs_handles_write(DazeDosfsHandles *handles, uint16_t dos_handle,
                                  const uint8_t *bytes, size_t count);
 DazeDosfsStatus daze_dosfs_handles_close(DazeDosfsHandles *handles, uint16_t dos_handle,

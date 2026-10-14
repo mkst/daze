@@ -379,7 +379,7 @@ static void input_and_metrics_contract(void) {
   assert(!serve_runner(&machine, &files, NULL, &mediator, 0x200, 0x21));
   struct kvm_sregs returned_sregs;
   assert(!write_back_frame(&machine, 0x100, &returned_sregs));
-  assert(reflect_run(&machine, &files, NULL, &mediator, 0x200, 0, &successor) == RMRUN_STOP);
+  assert(reflect_run(&machine, &files, NULL, &mediator, 0x200, 0, &successor, 0) == RMRUN_STOP);
   dump_rejected_far_load(&machine, &(struct kvm_regs){.rip = 0x1234});
   DazeRunMetrics metrics = {0};
   record_reflect_runner(NULL, 0x21, 10);
@@ -422,11 +422,236 @@ static void input_and_metrics_contract(void) {
          metrics.kvm_rm_procedure_costs[DAZE_RUN_METRICS_RM_OTHER].calls == 3);
 }
 
+static void native_binding_contract(void) {
+  uint8_t *guest = calloc(1, k_memory_size);
+  assert(guest);
+  struct {
+    struct kvm_run run;
+    uint8_t port_data[16];
+  } state = {0};
+  DazeKvmMachine machine = {.guest = guest,
+                            .guest_size = k_memory_size,
+                            .vcpu = INT32_MAX,
+                            .run = &state.run,
+                            .run_size = sizeof(state),
+                            .sync_regs_mask = KVM_SYNC_X86_REGS | KVM_SYNC_X86_SREGS};
+  ParkedState parked = {
+    .regs = {.rax = 0x12345678, .rip = 0xfde87e, .rsp = 0x100, .rflags = 2},
+    .sregs = {.cr0 = 0x11,
+              .gdt = {.base = k_dpmi_gdt_address, .limit = 0xffff},
+              .ldt = {.base = k_dpmi_ldt_address, .limit = 0xffff, .selector = 0x18, .present = 1},
+              .idt = {.base = 0xfdf800, .limit = 0x7ff}}};
+  parked.sregs.cs = (struct kvm_segment){.selector = 0x50,
+                                         .base = 0,
+                                         .limit = UINT32_MAX,
+                                         .type = 11,
+                                         .present = 1,
+                                         .s = 1,
+                                         .db = 1,
+                                         .g = 1};
+  parked.sregs.ss = (struct kvm_segment){
+    .selector = 0x10, .base = 0x10000, .limit = 0xffff, .type = 3, .present = 1, .s = 1};
+  parked.sregs.ds = parked.sregs.es = parked.sregs.ss;
+  parked.sregs.fs = (struct kvm_segment){
+    .selector = 0x58, .limit = UINT32_MAX, .type = 3, .present = 1, .s = 1, .db = 1, .g = 1};
+  parked.sregs.gs.unusable = 1;
+  daze_dpmi_descriptor_encode(guest + k_dpmi_gdt_address + 8, 0x10000, 0xffff, 0x9b, 0);
+  daze_dpmi_descriptor_encode(guest + k_dpmi_gdt_address + 0x10, 0x10000, 0xffff, 0x93, 0);
+  daze_dpmi_descriptor_encode(guest + k_dpmi_gdt_address + 0x28, 0x2000, 0xffff, 0x9b, 0);
+  daze_dpmi_descriptor_encode(guest + k_dpmi_gdt_address + 0x50, 0, 0xfffff, 0x9b, 12);
+  daze_dpmi_descriptor_encode(guest + k_dpmi_gdt_address + 0x58, 0, 0xfffff, 0x93, 12);
+  assert(daze_kvm_rm_entry_install(&machine, 0) && daze_kvm_rm_entry_install(&machine, 0xfde87e));
+  daze_write_u16(guest + 0xfdea20, 8);
+  for (unsigned kind = 0; kind < 25; ++kind) {
+    ParkedState candidate = parked;
+    daze_write_u32(guest + 0x5800, 0);
+    switch (kind) {
+    case 0:
+      break;
+    case 1:
+      machine.guest_size = 1;
+      break;
+    case 2:
+      daze_write_u32(guest + 0x5830, 0);
+      break;
+    case 3:
+      candidate.sregs.cs.base = 1;
+      break;
+    case 4:
+      candidate.sregs.cs.db = 0;
+      break;
+    case 5:
+      candidate.sregs.gdt.base++;
+      break;
+    case 6:
+      candidate.sregs.gdt.limit--;
+      break;
+    case 7:
+      candidate.sregs.ldt.base++;
+      break;
+    case 8:
+      candidate.sregs.ldt.limit--;
+      break;
+    case 9:
+      candidate.sregs.ss.selector = 0x18;
+      break;
+    case 10:
+      candidate.sregs.ss.db = 1;
+      break;
+    case 11:
+      candidate.sregs.ss.limit--;
+      break;
+    case 12:
+      candidate.sregs.ds.selector = 0x18;
+      break;
+    case 13:
+      candidate.sregs.es.selector = 0x18;
+      break;
+    case 14:
+      candidate.sregs.fs.selector = 0x10;
+      break;
+    case 15:
+      candidate.sregs.gs.unusable = 0;
+      break;
+    case 16:
+      candidate.sregs.ds.present = 0;
+      break;
+    case 17:
+      candidate.sregs.es.present = 0;
+      break;
+    case 18:
+      daze_write_u16(guest + 0xfdea20, 9);
+      break;
+    case 19:
+      guest[k_dpmi_gdt_address + 14] |= 0x40;
+      break;
+    case 20:
+      candidate.regs.r8 = 1;
+      break;
+    case 21:
+      daze_write_u32(guest + 0x5850, 0);
+      memset(guest + k_dpmi_gdt_address + 0x70, 0, 0x30);
+      guest[k_dpmi_gdt_address + 0x70] = 1;
+      break;
+    case 22:
+      candidate.sregs.gs = candidate.sregs.ds;
+      candidate.sregs.gs.selector = 0x9c;
+      daze_dpmi_descriptor_encode(guest + k_dpmi_ldt_address + 0x98, 0x10000, 0xffff, 0x93, 0);
+      break;
+    case 23:
+      candidate.sregs.gs = candidate.sregs.ds;
+      candidate.sregs.gs.selector = 0x100;
+      daze_dpmi_descriptor_encode(guest + k_dpmi_gdt_address + 0x100, 0x10000, 0xffff, 0x93, 0);
+      break;
+    case 24:
+      candidate.regs.rsp = 3;
+      break;
+    }
+    native_arm(&machine, &candidate, 0x11000);
+    assert((daze_read_u32(guest + 0x5800) == 1) == (kind == 0 || kind == 22 || kind == 23));
+    if (kind == 22) assert(daze_read_u32(guest + 0x5838) == k_dpmi_ldt_address + 0x98);
+    if (kind == 23) assert(daze_read_u32(guest + 0x5838) == k_dpmi_gdt_address + 0x100);
+    machine.guest_size = k_memory_size;
+    daze_write_u32(guest + 0x5830, 0xfde87e);
+    daze_write_u16(guest + 0xfdea20, 8);
+    guest[k_dpmi_gdt_address + 14] &= ~0x40;
+    if (kind == 21) {
+      memset(guest + k_dpmi_gdt_address + 0x70, 0, 0x30);
+      daze_write_u32(guest + 0x5850, 0);
+    }
+  }
+  native_arm(&machine, &parked, 0x11000);
+  assert(install_return_bridge(&machine, &parked, 0x11000) == 1);
+  state.run.s.regs.regs = (struct kvm_regs){.rax = 0x98765432};
+  state.run.s.regs.sregs = parked.sregs;
+  state.run.s.regs.sregs.cr0 &= ~UINT64_C(1);
+  ParkedState restored;
+  assert(native_parked(&machine, &restored) && restored.regs.rax == parked.regs.rax &&
+         restored.regs.rip == parked.regs.rip && restored.sregs.ss.base == parked.sregs.ss.base);
+  machine.guest_size = 1;
+  assert(!native_parked(&machine, &restored));
+  machine.guest_size = k_memory_size;
+  machine.sync_regs_mask = 0;
+  assert(!native_parked(&machine, &restored));
+  machine.sync_regs_mask = KVM_SYNC_X86_REGS | KVM_SYNC_X86_SREGS;
+  DazeKvmDpmiEntryResult successor;
+  daze_write_u32(guest + 0x5840, 1);
+  assert(!native_host_return(&machine, &successor));
+  assert(daze_read_u32(guest + 0x5840) == 0 && daze_read_u32(guest + 0x2200) == parked.regs.rax);
+  DazeDosfsFileService files = {0};
+  DazeDosProcessState process = {0};
+  DazeKvmDpmiMediator mediator = {0};
+  const DazeKvmRmProcedureInput input = {
+    .machine = &machine, .files = &files, .process_state = &process, .mediator = &mediator};
+  mediator.guest = guest;
+  mediator.guest_size = k_memory_size;
+  mediator.rm_procedure_present = 1;
+  mediator.rm_procedure.frame_address = k_dpmi_rm_entry_linear;
+  assert(!daze_kvm_rm_procedure_reflect(&input, &successor));
+  mediator.rm_procedure.frame_address = 0x11000;
+  mediator.rm_procedure.stack_address = k_dpmi_rm_entry_linear;
+  assert(!daze_kvm_rm_procedure_reflect(&input, &successor));
+  mediator.rm_procedure_present = 0;
+  for (unsigned kind = 0; kind < 8; ++kind) {
+    DazeKvmRmProcedureInput bad = input;
+    daze_write_u32(guest + 0x5840, 1);
+    switch (kind) {
+    case 0:
+      assert(!daze_kvm_rm_entry_continue(NULL, &successor));
+      continue;
+    case 1:
+      assert(!daze_kvm_rm_entry_continue(&bad, NULL));
+      continue;
+    case 2:
+      bad.mediator = NULL;
+      break;
+    case 3:
+      bad.files = NULL;
+      break;
+    case 4:
+      bad.process_state = NULL;
+      break;
+    case 5:
+      daze_write_u32(guest + 0x5840, 0);
+      break;
+    case 6:
+      machine.run = NULL;
+      break;
+    case 7:
+      machine.vcpu = -1;
+      break;
+    }
+    assert(!daze_kvm_rm_entry_continue(&bad, &successor));
+    machine.run = &state.run;
+    machine.vcpu = INT32_MAX;
+  }
+  daze_write_u32(guest + 0x5840, 1);
+  daze_write_u16(guest + 0x2a42, 1);
+  state.run.exit_reason = KVM_EXIT_IO;
+  state.run.io.direction = KVM_EXIT_IO_OUT;
+  state.run.io.port = 0xf4;
+  state.run.io.size = 1;
+  state.run.io.count = 1;
+  state.run.io.data_offset = sizeof(state.run);
+  state.port_data[0] = 0x31;
+  assert(daze_kvm_rm_entry_continue(&input, &successor) &&
+         successor.observation.kind == DAZE_KVM_DPMI_ENTRY_EXIT_PIO);
+  daze_write_u16(guest + 0x2a42, 0);
+  state.run.exit_reason = KVM_EXIT_HLT;
+  state.run.s.regs.regs.rip = 1;
+  state.run.s.regs.sregs.cs.selector = 0x230;
+  state.run.s.regs.sregs.cs.base = 0x2300;
+  state.run.s.regs.sregs.cr0 = 0x10;
+  assert(!daze_kvm_rm_entry_continue(&input, &successor));
+  free(guest);
+}
+
 int main(void) {
   return_bridge_contract();
   protected_return_contract();
   descriptor_reply_contract();
   input_and_metrics_contract();
+  native_binding_contract();
   return 0;
 }
 #else

@@ -36,6 +36,11 @@ enum {
   k_dpmi_rm_return_bridge_size = 0xb00,
   k_dpmi_rm_entry_linear = 0x5000,
   k_dpmi_rm_entry_size = 0x1000,
+  k_kvm_write_batch_code = 0x7400,
+  k_kvm_write_batch_control = 0x7800,
+  k_kvm_write_batch_data = 0x8000,
+  k_kvm_write_batch_capacity = 0x4000,
+  k_kvm_write_batch_size = 0x4c00,
   k_bios_config_table = 0x1f100,
   k_pm_reentry_wrapper = 0x2180,
   k_pm_reentry_state = 0x2200,
@@ -64,7 +69,7 @@ enum {
   k_dos_psp_size = 256,
   k_dos_environment_max_size = 512,
   k_dos_dpmi_entry_stub_size = 3,
-  k_dos_vector_gate_size = 3,
+  k_dos_vector_gate_size = 12,
   k_dos_vector_gate_iret_offset = 0x10,
   k_dos_vector_gate_iret_size = 1,
   k_dos_dbcs_table_size = 2,
@@ -120,6 +125,7 @@ typedef enum {
   DAZE_GUEST_OWNER_KVM_RUNNER_MAILBOX,
   DAZE_GUEST_OWNER_KVM_RM_RETURN_BRIDGE,
   DAZE_GUEST_OWNER_KVM_RM_ENTRY,
+  DAZE_GUEST_OWNER_KVM_WRITE_BATCH,
   DAZE_GUEST_OWNER_COUNT,
   DAZE_GUEST_OWNER_NONE = DAZE_GUEST_OWNER_COUNT,
 } DazeGuestOwner;
@@ -132,7 +138,7 @@ typedef struct {
 
 enum { DAZE_GUEST_LAYOUT_MAX_RANGES = 20 };
 
-enum { DAZE_GUEST_LAYOUT_STABLE_COUNT = 12 };
+enum { DAZE_GUEST_LAYOUT_STABLE_COUNT = 13 };
 
 typedef struct {
   DazeGuestRange ranges[DAZE_GUEST_LAYOUT_MAX_RANGES];

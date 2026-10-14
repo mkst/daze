@@ -968,6 +968,26 @@ DazeDosfsStatus daze_dosfs_handles_flush(const DazeDosfsHandles *handles, int *h
   return DAZE_DOSFS_OK;
 }
 
+uint16_t daze_dosfs_handles_write_credit(const DazeDosfsHandles *handles, uint16_t handle) {
+  if (handles == NULL || !handles->buffered_writes || handle >= DAZE_DOSFS_MAX_HANDLES ||
+      handles->host_fds[handle] < 0)
+    return 0;
+  const DazeDosfsWriteBuffer *buffer = handles->write_buffers[handle];
+  return buffer != NULL && !buffer->disabled && buffer->used <= sizeof(buffer->bytes)
+           ? (uint16_t)(sizeof(buffer->bytes) - buffer->used)
+           : 0;
+}
+
+int daze_dosfs_handles_append_buffered(DazeDosfsHandles *handles, uint16_t handle,
+                                       const uint8_t *bytes, uint16_t count) {
+  if (bytes == NULL || count == 0 || count > daze_dosfs_handles_write_credit(handles, handle))
+    return 0;
+  DazeDosfsWriteBuffer *buffer = handles->write_buffers[handle];
+  memcpy(buffer->bytes + buffer->used, bytes, count);
+  buffer->used += count;
+  return 1;
+}
+
 ssize_t daze_dosfs_handles_write(DazeDosfsHandles *handles, uint16_t dos_handle,
                                  const uint8_t *bytes, size_t count) {
   int fd;

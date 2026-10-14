@@ -19,6 +19,7 @@
 #include <string.h>
 #include "rm_entry_code.h"
 #include "rm_entry.h"
+#include "write_batch.h"
 
 int daze_kvm_rm_entry_install(DazeKvmMachine *machine, uint32_t epilogue) {
   if (epilogue == 0) return 1;
@@ -612,6 +613,7 @@ static int reflect_run(DazeKvmMachine *machine, DazeDosfsFileService *files,
       return RMRUN_STOP;
     }
     observed_first = 0;
+    if (!daze_kvm_write_batch_drain(machine, files)) return RMRUN_STOP;
     const uint32_t next_callback = daze_kvm_rm_entry_count(machine);
     if (next_callback != callback) {
       callback = next_callback;

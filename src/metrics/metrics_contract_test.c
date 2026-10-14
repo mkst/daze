@@ -250,6 +250,14 @@ static void reporting(void) {
   lacks("kvm-guest-virtual-interrupts");
   has("kvm-rm-procedure total=1/10.000ms/10000.0us KVM_RUN=0/0.000ms/0.0us");
   has("kvm-rm-procedure-bridged=1 (reflect includes protected execution to next exit)");
+  lacks("kvm-guest-writes=");
+  run.kvm_guest_write_calls = 7;
+  run.kvm_guest_write_bytes = 99;
+  run.kvm_guest_write_drains = 2;
+  run.kvm_rm_procedure_native_calls = 3;
+  capture(1, NULL, &run, NULL);
+  has("kvm-guest-writes=7/99B drains=2\n");
+  has("kvm-rm-procedure-native=3 (host detour timings may include multiple guest callbacks)");
   has("transition=0.000ms other=5.000ms");
   lacks("debug-arm=");
   has("kvm-rm-procedure-resume KVM_RUN=0.000ms capture=1.000ms other=2.000ms");

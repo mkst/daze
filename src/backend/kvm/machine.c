@@ -1,11 +1,12 @@
 #include "machine.h"
 #include "machine_private.h"
 #include "monotonic_clock.h"
-#include "rm_entry.h"
 #include <stdlib.h>
 #include <string.h>
 
 #if defined(__linux__) && (defined(__x86_64__) || defined(__i386__))
+#include "rm_entry.h"
+#include "write_batch.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/kvm.h>
@@ -219,9 +220,10 @@ void daze_kvm_machine_snapshot_dispose(DazeKvmMachineSnapshot *snapshot) {
 int daze_kvm_machine_snapshot_take(const DazeKvmMachine *machine,
                                    DazeKvmMachineSnapshot *snapshot) {
   if (machine == NULL || snapshot == NULL || machine->guest == NULL || machine->vcpu < 0 ||
-      machine->guest_size == 0)
+      machine->guest_size == 0 || daze_kvm_write_batch_pending(machine))
     return DAZE_KVM_MACHINE_INVALID;
-  DazeKvmMachineSnapshot candidate = {.guest_size = machine->guest_size};
+  DazeKvmMachineSnapshot candidate = {.guest_size = machine->guest_size,
+                                      .write_batch_installed = machine->write_batch_installed};
   candidate.guest_bytes = malloc(candidate.guest_size);
   candidate.cpu_state = malloc(sizeof(DazeKvmMachineCpuState));
   if (candidate.guest_bytes == NULL || candidate.cpu_state == NULL) {
@@ -244,7 +246,7 @@ int daze_kvm_machine_snapshot_restore(DazeKvmMachine *machine,
                                       const DazeKvmMachineSnapshot *snapshot) {
   if (machine == NULL || snapshot == NULL || !snapshot->valid || machine->guest == NULL ||
       machine->vcpu < 0 || snapshot->guest_bytes == NULL || snapshot->cpu_state == NULL ||
-      snapshot->guest_size != machine->guest_size)
+      snapshot->guest_size != machine->guest_size || daze_kvm_write_batch_pending(machine))
     return DAZE_KVM_MACHINE_INVALID;
   const DazeKvmMachineCpuState *state = snapshot->cpu_state;
   if (ioctl(machine->vcpu, KVM_SET_SREGS, &state->sregs) < 0 ||
@@ -253,6 +255,8 @@ int daze_kvm_machine_snapshot_restore(DazeKvmMachine *machine,
   daze_kvm_rm_entry_sync_metrics(machine);
   memcpy(machine->guest, snapshot->guest_bytes, machine->guest_size);
   daze_kvm_rm_entry_invalidate(machine);
+  machine->write_batch_installed = snapshot->write_batch_installed;
+  daze_kvm_write_batch_revoke(machine);
   return daze_kvm_machine_sync_refresh(machine);
 }
 int daze_kvm_machine_set_real_mode(DazeKvmMachine *m, uint16_t cs, uint16_t ip, uint16_t ss,
