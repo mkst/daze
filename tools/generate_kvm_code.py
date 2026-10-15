@@ -30,6 +30,14 @@ PROFILES = {
         "disasm": "intel",
       },
       {
+        "name": "native_set_descriptor_code",
+        "section": ".set_descriptor",
+        "base": 0x5ea0,
+        "limit": 0x6000,
+        "start": 0x5ea0,
+        "disasm": "intel",
+      },
+      {
         "name": "native_low_code",
         "section": ".low",
         "base": 0x2720,

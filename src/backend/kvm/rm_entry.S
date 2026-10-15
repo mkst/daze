@@ -11,7 +11,14 @@
 .equ VECTOR_COUNT, CTRL+0x680
 .equ VECTOR_VALID, CTRL+0x684
 .equ VECTOR_SIGNATURE, 0x02040204
+.equ SET_COUNT, CTRL+0x68c
+.equ SET_GDT, CTRL+0x690
+.equ SET_GDT_LAST, CTRL+0x694
+.equ SET_RAM_LAST, CTRL+0x698
+.equ SET_VALID, CTRL+0x69c
 native_entry:
+  cmp word ptr fs:[REC], 0xc
+  je set_descriptor_entry
   cmp word ptr fs:[REC], 0x204
   je vector_entry
   cmp word ptr fs:[REC], 7
@@ -394,6 +401,74 @@ descriptor_fallback:
   mov al, 0x31
   out 0xf4, al
   jmp dword ptr fs:[CTRL+0x30]
+
+.section .set_descriptor,"ax"
+.code32
+set_descriptor_entry:
+  cmp dword ptr fs:[SET_VALID], 0x000c000c
+  jne descriptor_fallback
+  mov eax, cr0
+  test eax, 0x80000000
+  jnz descriptor_fallback
+  mov edi, fs:[CTRL+0x70]
+  movzx edx, word ptr fs:[REC+4]
+  test dl, 4
+  jz descriptor_fallback
+  and edx, 0xfff8
+  jz descriptor_fallback
+  cmp edx, edi
+  ja descriptor_fallback
+  add edx, fs:[CTRL+0x6c]
+  movzx ecx, word ptr fs:[REC+20]
+  mov esi, ecx
+  and esi, 0xfff8
+  jz descriptor_fallback
+  test cl, 4
+  jz set_descriptor_global_source
+  cmp esi, edi
+  ja descriptor_fallback
+  add esi, fs:[CTRL+0x6c]
+  jmp set_descriptor_source
+set_descriptor_global_source:
+  cmp esi, fs:[SET_GDT_LAST]
+  ja descriptor_fallback
+  add esi, fs:[SET_GDT]
+set_descriptor_source:
+  mov eax, fs:[esi+4]
+  movzx ecx, word ptr fs:[esi+2]
+  mov ebx, eax
+  and ebx, 0xff000000
+  or ecx, ebx
+  and eax, 0xff
+  shl eax, 16
+  or ecx, eax
+  movzx eax, word ptr fs:[REC+16]
+  add ecx, eax
+  jc descriptor_fallback
+  cmp ecx, fs:[SET_RAM_LAST]
+  ja descriptor_fallback
+  /* Snapshot the source before either store: descriptor buffers can overlap. */
+  mov eax, fs:[ecx]
+  mov ebx, fs:[ecx+4]
+  test ebx, 0x100000
+  jnz descriptor_fallback
+  test bh, 0x10
+  jz descriptor_fallback
+  test bh, 0x60
+  jnz descriptor_fallback
+  mov cl, bh
+  and cl, 0x88
+  cmp cl, 0x88
+  jne set_descriptor_valid
+  mov cl, bh
+  and cl, 6
+  cmp cl, 2
+  jne descriptor_fallback
+set_descriptor_valid:
+  mov fs:[edx], eax
+  mov fs:[edx+4], ebx
+  inc dword ptr fs:[SET_COUNT]
+  jmp descriptor_reply
 
 .section .low,"ax"
 .code16

@@ -484,6 +484,69 @@ static void native_binding_contract(void) {
   for (unsigned i = 0; i < 3; ++i)
     assert(metrics.kvm_guest_descriptor_calls[i] == i + 1);
   uint8_t *control = guest + DAZE_KVM_RM_ENTRY_CONTROL;
+  DazeKvmDpmiMediator descriptors = {.guest = guest,
+                                     .guest_size = machine.guest_size,
+                                     .record_address = 0xfdea00,
+                                     .mailbox_address = 0xfdea40,
+                                     .gdt_address = k_dpmi_gdt_address,
+                                     .gdt_size = 0x10000,
+                                     .ldt_address = k_dpmi_ldt_address,
+                                     .ldt_size = 0x10000};
+  daze_kvm_rm_entry_publish_descriptors(NULL);
+  for (unsigned kind = 0; kind < 17; ++kind) {
+    DazeKvmDpmiMediator bad = descriptors;
+    daze_kvm_rm_entry_publish_descriptors(&descriptors);
+    assert(daze_read_u32(control + DAZE_KVM_RM_ENTRY_SET_DESCRIPTOR_VALID_OFFSET) ==
+           DAZE_KVM_RM_ENTRY_SET_DESCRIPTOR_SIGNATURE);
+    if (kind == 0) bad.guest = NULL;
+    if (kind == 1) bad.guest_size = 1;
+    if (kind == 2) {
+      daze_write_u32(control + DAZE_KVM_RM_ENTRY_SIGNATURE_OFFSET, 0);
+      daze_write_u32(control + DAZE_KVM_RM_ENTRY_SET_DESCRIPTOR_VALID_OFFSET, 0);
+    }
+    if (kind == 3) bad.record_address++;
+    if (kind == 4) bad.mailbox_address++;
+    if (kind == 5) bad.gdt_size = 0;
+    if (kind == 6) bad.gdt_size = 0x10008;
+    if (kind == 7) bad.gdt_size = 9;
+    if (kind == 8) bad.ldt_size = 8;
+    if (kind == 9) bad.ldt_size = 0x10008;
+    if (kind == 10) bad.ldt_size = 17;
+    if (kind == 11) bad.gdt_address = UINT32_MAX;
+    if (kind == 12) bad.ldt_address = UINT32_MAX;
+    if (kind == 13) bad.ldt_address -= 8;
+    if (kind == 14) bad.ldt_size -= 8;
+    if (kind == 15) daze_write_u32(control + DAZE_KVM_RM_ENTRY_LDT_LAST_OFFSET, 0);
+    if (kind == 16) {
+#if SIZE_MAX > UINT32_MAX
+      bad.guest_size = (size_t)UINT32_MAX + 1;
+#else
+      bad.gdt_size = 0;
+#endif
+    }
+    daze_kvm_rm_entry_publish_descriptors(&bad);
+    if (kind != 0 && kind != 1) {
+      if (daze_read_u32(control + DAZE_KVM_RM_ENTRY_SET_DESCRIPTOR_VALID_OFFSET) != 0)
+        fprintf(stderr, "descriptor metadata accepted invalid case %u\n", kind);
+      assert(daze_read_u32(control + DAZE_KVM_RM_ENTRY_SET_DESCRIPTOR_VALID_OFFSET) == 0);
+    }
+    daze_write_u32(control + DAZE_KVM_RM_ENTRY_SIGNATURE_OFFSET, DAZE_KVM_RM_ENTRY_SIGNATURE);
+    daze_write_u32(control + DAZE_KVM_RM_ENTRY_LDT_LAST_OFFSET, 0xfff8);
+  }
+  daze_kvm_rm_entry_publish_descriptors(&descriptors);
+  assert(daze_read_u32(control + DAZE_KVM_RM_ENTRY_SET_DESCRIPTOR_GDT_OFFSET) ==
+         k_dpmi_gdt_address);
+  assert(daze_read_u32(control + DAZE_KVM_RM_ENTRY_SET_DESCRIPTOR_RAM_LAST_OFFSET) ==
+         machine.guest_size - 8);
+  daze_write_u32(control + DAZE_KVM_RM_ENTRY_SET_DESCRIPTOR_COUNT_OFFSET, 7);
+  daze_kvm_rm_entry_sync_metrics(&machine);
+  daze_kvm_rm_entry_sync_metrics(&machine);
+  assert(metrics.kvm_guest_descriptor_calls[3] == 7);
+  daze_write_u32(control + DAZE_KVM_RM_ENTRY_SET_DESCRIPTOR_COUNT_OFFSET, 3);
+  assert(daze_kvm_rm_entry_install(&machine, 1, k_dpmi_ldt_address, 0x10000));
+  assert(metrics.kvm_guest_descriptor_calls[3] == 10);
+  assert(daze_read_u32(control + DAZE_KVM_RM_ENTRY_SET_DESCRIPTOR_VALID_OFFSET) == 0);
+  assert(daze_read_u32(control + DAZE_KVM_RM_ENTRY_SET_DESCRIPTOR_COUNT_OFFSET) == 0);
   DazeKvmDpmiMediator vectors = {.guest = guest,
                                  .guest_size = machine.guest_size,
                                  .record_address = 0xfdea00,

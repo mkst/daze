@@ -354,6 +354,7 @@ static DazeKvmDpmiMediator mediator_for_gate(DazeKvmMachine *machine,
   mediator.default_interrupt_vectors[DAZE_INT_DOS] =
     daze_kvm_command_owner_default_vector21(layout);
   daze_kvm_rm_entry_publish_vectors(&mediator);
+  daze_kvm_rm_entry_publish_descriptors(&mediator);
   return mediator;
 }
 

@@ -31,6 +31,9 @@ int daze_kvm_rm_entry_install(DazeKvmMachine *machine, uint32_t epilogue, uint32
                  "entry code stays below control state");
   _Static_assert(sizeof(native_low_code) <= DAZE_KVM_RM_ENTRY_PARKED - DAZE_KVM_RM_ENTRY_LOW_LINEAR,
                  "low entry code stays below parked state");
+  _Static_assert(DAZE_KVM_RM_ENTRY_SET_DESCRIPTOR_LINEAR + sizeof(native_set_descriptor_code) <=
+                   DAZE_KVM_RM_ENTRY_CONTROL + DAZE_KVM_RM_ENTRY_CONTROL_SIZE,
+                 "set descriptor helper stays inside reserved control storage");
   uint8_t control[DAZE_KVM_RM_ENTRY_CONTROL_SIZE] = {0};
   daze_kvm_rm_entry_sync_metrics(machine);
   daze_write_u32(control + 0x30, epilogue);
@@ -48,7 +51,9 @@ int daze_kvm_rm_entry_install(DazeKvmMachine *machine, uint32_t epilogue, uint32
                                 sizeof(native_entry_code)) &&
          daze_kvm_machine_write(machine, DAZE_KVM_RM_ENTRY_LOW_LINEAR, native_low_code,
                                 sizeof(native_low_code)) &&
-         daze_kvm_machine_write(machine, DAZE_KVM_RM_ENTRY_CONTROL, control, sizeof(control));
+         daze_kvm_machine_write(machine, DAZE_KVM_RM_ENTRY_CONTROL, control, sizeof(control)) &&
+         daze_kvm_machine_write(machine, DAZE_KVM_RM_ENTRY_SET_DESCRIPTOR_LINEAR,
+                                native_set_descriptor_code, sizeof(native_set_descriptor_code));
 }
 
 #if defined(__linux__) && (defined(__x86_64__) || defined(__i386__))

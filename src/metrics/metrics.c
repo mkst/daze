@@ -405,12 +405,13 @@ void daze_metrics_report_run(const DazeRunMetrics *metrics) {
               metrics->kvm_guest_virtual_interrupt_calls[0],
               metrics->kvm_guest_virtual_interrupt_calls[1]);
     if (metrics->kvm_guest_descriptor_calls[0] != 0 ||
-        metrics->kvm_guest_descriptor_calls[1] != 0 || metrics->kvm_guest_descriptor_calls[2] != 0)
+        metrics->kvm_guest_descriptor_calls[1] != 0 ||
+        metrics->kvm_guest_descriptor_calls[2] != 0 || metrics->kvm_guest_descriptor_calls[3] != 0)
       fprintf(stderr,
               "metrics: kvm-guest-descriptors 0007h=%" PRIu64 " 0008h=%" PRIu64 " 0009h=%" PRIu64
-              "\n",
+              " 000ch=%" PRIu64 "\n",
               metrics->kvm_guest_descriptor_calls[0], metrics->kvm_guest_descriptor_calls[1],
-              metrics->kvm_guest_descriptor_calls[2]);
+              metrics->kvm_guest_descriptor_calls[2], metrics->kvm_guest_descriptor_calls[3]);
     if (metrics->kvm_guest_vector_queries != 0)
       fprintf(stderr, "metrics: kvm-guest-vector-queries 0204h=%" PRIu64 "\n",
               metrics->kvm_guest_vector_queries);
