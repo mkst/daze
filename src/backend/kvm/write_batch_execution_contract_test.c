@@ -5,6 +5,9 @@
 #include "rm_entry.h"
 #include "machine_access.h"
 
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include <assert.h>
 #include <fcntl.h>
 #include <stdio.h>

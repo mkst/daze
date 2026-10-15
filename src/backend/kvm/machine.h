@@ -14,6 +14,8 @@ typedef struct {
   /* Probed KVM_SYNC_REGS class mask (0 when unsupported: register access
    * stays on ioctls). Plain int: no <linux/kvm.h> needed here. */
   int sync_regs_mask;
+  uint64_t debug_breakpoint;
+  int debug_breakpoint_known, debug_io_exit;
   int write_batch_installed;
   uint16_t write_batch_handle, write_batch_credit;
 } DazeKvmMachine;

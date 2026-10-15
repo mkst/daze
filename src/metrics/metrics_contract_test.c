@@ -179,11 +179,13 @@ static void reporting(void) {
   run.kvm_gate_frame_capture_calls = 1;
   run.kvm_gate_frame_capture_nanoseconds = 1000000;
   run.kvm_dpmi_debug_update_calls = 1;
+  run.kvm_debug_update_elisions = 2;
   run.kvm_dpmi_debug_update_nanoseconds = 1000000;
   capture(1, NULL, &run, NULL);
   has("kvm-gate-frame capture=1/1.000ms/1000.0us reply=0/0.000ms/0.0us");
   has("state-capture=0/0.000ms/0.0us");
   has("debug-update=1/1.000ms/1000.0us mediator=0/0.000ms/0.0us");
+  has("metrics: kvm-debug-update-elisions=2");
   lacks("kvm-rm-procedure total");
   run.kvm_gate_frame_capture_calls = 0;
   run.kvm_gate_frame_capture_nanoseconds = 0;

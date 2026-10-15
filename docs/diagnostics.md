@@ -4,6 +4,10 @@
 counters. `--debug` adds service and loader messages. These controls are
 independent of instruction tracing.
 
+`kvm-dpmi-host debug-update` counts actual debug configuration ioctls across
+KVM continuations. `kvm-debug-update-elisions` counts identical return-breakpoint
+configurations retained after I/O exits; it does not count removed debug exits.
+
 `kvm-rm-procedure-bridged` counts callbacks whose guest return stub resumes the
 protected caller without an intermediate userspace exit. For these callbacks,
 `reflect` and its `KVM_RUN` time include protected execution to the next exit;

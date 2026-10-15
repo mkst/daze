@@ -1,5 +1,6 @@
 #include "interrupt_vector.h"
 #include "legacy_exception.h"
+#include "machine_access.h"
 #include "descriptor.h"
 #include "exception_frame.h"
 #include "idt_gate.h"
@@ -49,7 +50,7 @@ static int debug_return(DazeKvmMachine *m, uint32_t linear, int enabled) {
     debug.arch.debugreg[0] = linear;
     debug.arch.debugreg[7] = 3;
   }
-  return ioctl(m->vcpu, KVM_SET_GUEST_DEBUG, &debug) == 0;
+  return daze_kvm_machine_set_guest_debug(m, &debug) == 0;
 }
 int daze_kvm_legacy_exception_install(DazeKvmMachine *m, const DazeKvmProtectedGateLayout *gate) {
   const uint8_t bytes[] = {
@@ -201,6 +202,7 @@ int daze_kvm_legacy_exception_boundary(DazeKvmMachine *m, const DazeKvmProtected
       fprintf(stderr, "legacy-np: %04x:%04x error=%04x -> %04x:%04x depth=%zu\n", cs, ip, error,
               handler_cs, handler_ip, state->depth);
   }
+  daze_kvm_machine_debug_invalidate(m);
   if (ioctl(m->vcpu, KVM_SET_SREGS, &s) < 0 || ioctl(m->vcpu, KVM_SET_REGS, &r) < 0 ||
       !daze_kvm_legacy_exception_rearm(m, state))
     return -1;

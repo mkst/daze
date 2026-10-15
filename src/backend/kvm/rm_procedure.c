@@ -232,7 +232,7 @@ static int install_return_bridge(DazeKvmMachine *machine, const ParkedState *par
 static int timed_rm_kvm_run(DazeKvmMachine *machine) {
   DazeRunMetrics *const metrics = machine->run_metrics;
   const uint64_t started = metrics != NULL && metrics->enabled ? monotonic_nanoseconds() : 0;
-  const int status = ioctl(machine->vcpu, KVM_RUN, 0);
+  const int status = daze_kvm_machine_run(machine);
   if (metrics != NULL && metrics->enabled) {
     const uint64_t finished = monotonic_nanoseconds();
     metrics->kvm_rm_procedure_run_calls++;
@@ -993,7 +993,7 @@ int daze_kvm_rm_procedure_reflect(const DazeKvmRmProcedureInput *input,
       struct kvm_guest_debug debug = {.control = KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_USE_HW_BP};
       debug.arch.debugreg[0] = input->protected_return_linear;
       debug.arch.debugreg[7] = 3;
-      if (ioctl(machine->vcpu, KVM_SET_GUEST_DEBUG, &debug) < 0) return 0;
+      if (daze_kvm_machine_set_guest_debug(machine, &debug) < 0) return 0;
     }
     resumed = daze_kvm_dpmi_entry_continue_mediator_or_capture(machine, successor) ==
               DAZE_KVM_DPMI_ENTRY_OK;

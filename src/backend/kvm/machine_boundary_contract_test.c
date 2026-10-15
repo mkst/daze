@@ -5,11 +5,90 @@
 #undef NDEBUG
 #endif
 #include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #if defined(__linux__) && (defined(__x86_64__) || defined(__i386__))
 #include <linux/kvm.h>
 #include <sys/ioctl.h>
+
+static void debug_exit(DazeKvmMachine *m, uint32_t expected) {
+  const int status = daze_kvm_machine_run(m);
+  const struct kvm_run *run = m->run;
+  if (status == 0 && run->exit_reason == expected) return;
+  struct kvm_regs regs = {0};
+  struct kvm_sregs sregs = {0};
+  const int r = ioctl(m->vcpu, KVM_GET_REGS, &regs);
+  const int s = ioctl(m->vcpu, KVM_GET_SREGS, &sregs);
+  fprintf(stderr,
+          "debug cache: run=%d exit=%u expected=%u regs=%d/%d cs:ip=%04x:%llx "
+          "ax=%llx flags=%llx\n",
+          status, run->exit_reason, expected, r, s, sregs.cs.selector, (unsigned long long)regs.rip,
+          (unsigned long long)regs.rax, (unsigned long long)regs.rflags);
+  abort();
+}
+
+static void debugging(DazeKvmMachine *m) {
+  struct kvm_guest_debug debug = {.control = KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_USE_HW_BP};
+  debug.arch.debugreg[0] = 5;
+  debug.arch.debugreg[7] = 3;
+  assert(daze_kvm_machine_set_guest_debug(NULL, &debug) == -1);
+  assert(daze_kvm_machine_set_guest_debug(m, NULL) == -1);
+  DazeKvmMachine invalid = *m;
+  invalid.vcpu = -1;
+  assert(daze_kvm_machine_set_guest_debug(&invalid, &debug) == -1);
+  for (unsigned mode = 0; mode < 3; ++mode) {
+    DazeRunMetrics metrics = {.enabled = mode == 2};
+    daze_kvm_machine_set_run_metrics(m, mode == 0 ? NULL : &metrics);
+    const uint8_t code[] = {0xe6, 0xf4, /* out 0xf4,al */
+                            0x90,       /* nop */
+                            0xe6, 0xf4, /* out 0xf4,al */
+                            0x90,       /* nop */
+                            0xf4};      /* hlt */
+    memcpy(m->guest, code, sizeof(code));
+    assert(daze_kvm_machine_set_real_mode(m, 0, 0, 0, 0x8000, 0, 0) == 0);
+    assert(daze_kvm_machine_set_guest_debug(m, &debug) == 0);
+    assert(daze_kvm_machine_set_guest_debug(m, &debug) == 0);
+    assert(metrics.kvm_dpmi_debug_update_calls == (mode == 2 ? 2u : 0u));
+    debug_exit(m, KVM_EXIT_IO);
+    assert(daze_kvm_machine_set_guest_debug(m, &debug) == 0);
+    assert(metrics.kvm_debug_update_elisions == (mode == 2 ? 1u : 0u));
+    debug.arch.debugreg[0] = 6;
+    assert(daze_kvm_machine_set_guest_debug(m, &debug) == 0);
+    debug.arch.debugreg[0] = 5;
+    assert(daze_kvm_machine_set_guest_debug(m, &debug) == 0);
+    assert(metrics.kvm_dpmi_debug_update_calls == (mode == 2 ? 4u : 0u));
+    debug_exit(m, KVM_EXIT_IO);
+    assert(daze_kvm_machine_set_guest_debug(m, &debug) == 0);
+    assert(metrics.kvm_debug_update_elisions == (mode == 2 ? 2u : 0u));
+    debug_exit(m, KVM_EXIT_DEBUG);
+    assert(((struct kvm_run *)m->run)->debug.arch.pc == 5);
+    assert(!m->debug_breakpoint_known && !m->debug_io_exit);
+    assert(daze_kvm_machine_set_guest_debug(m, &debug) == 0);
+    struct kvm_guest_debug disabled = {0};
+    assert(daze_kvm_machine_set_guest_debug(m, &disabled) == 0);
+    assert(daze_kvm_machine_set_guest_debug(m, &disabled) == 0);
+    assert(metrics.kvm_dpmi_debug_update_calls == (mode == 2 ? 7u : 0u));
+    debug_exit(m, KVM_EXIT_HLT);
+    assert(!m->debug_breakpoint_known && !m->debug_io_exit);
+    struct kvm_guest_debug stepping = {.control = KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_SINGLESTEP};
+    assert(daze_kvm_machine_set_guest_debug(m, &stepping) == 0);
+    assert(daze_kvm_machine_set_guest_debug(m, &stepping) == 0);
+    assert(metrics.kvm_dpmi_debug_update_calls == (mode == 2 ? 9u : 0u));
+    assert(daze_kvm_machine_set_guest_debug(m, &disabled) == 0);
+  }
+  daze_kvm_machine_set_run_metrics(m, NULL);
+  DazeKvmMachine failed = *m;
+  failed.vcpu = m->kvm;
+  failed.debug_breakpoint_known = failed.debug_io_exit = 1;
+  failed.debug_breakpoint = 6;
+  assert(daze_kvm_machine_set_guest_debug(&failed, &debug) == -1);
+  assert(!failed.debug_breakpoint_known);
+  failed.debug_breakpoint_known = failed.debug_io_exit = 1;
+  assert(daze_kvm_machine_run(&failed) == -1);
+  assert(!failed.debug_breakpoint_known && !failed.debug_io_exit);
+}
 
 static void registers(DazeKvmMachine *m) {
   struct kvm_regs r, before, after;
@@ -50,8 +129,12 @@ static void registers(DazeKvmMachine *m) {
       r.rip = 0;
       s.ds.selector = (uint16_t)(0x123 + mode * 2 + sync);
       s.ds.base = (uint64_t)s.ds.selector << 4;
+      m->debug_breakpoint_known = m->debug_io_exit = 1;
       assert(daze_kvm_machine_set_regs(m, &r) == DAZE_KVM_MACHINE_OK);
+      assert(!m->debug_breakpoint_known && !m->debug_io_exit);
+      m->debug_breakpoint_known = m->debug_io_exit = 1;
       assert(daze_kvm_machine_set_sregs(m, &s) == DAZE_KVM_MACHINE_OK);
+      assert(!m->debug_breakpoint_known && !m->debug_io_exit);
       ((uint8_t *)m->guest)[0] = 0xf4; /* hlt */
       assert(ioctl(m->vcpu, KVM_RUN, 0) == 0);
       assert(((struct kvm_run *)m->run)->exit_reason == KVM_EXIT_HLT);
@@ -110,7 +193,9 @@ static void snapshots(DazeKvmMachine *m) {
   }
   ((uint8_t *)m->guest)[0x500] = 0;
   assert(daze_kvm_machine_set_general_registers(m, 9, 9, 9, 9, 9, 9) == DAZE_KVM_MACHINE_OK);
+  m->debug_breakpoint_known = m->debug_io_exit = 1;
   assert(daze_kvm_machine_snapshot_restore(m, &snapshot) == DAZE_KVM_MACHINE_OK);
+  assert(!m->debug_breakpoint_known && !m->debug_io_exit);
   assert(memcmp(m->guest, snapshot.guest_bytes, m->guest_size) == 0);
   assert(ioctl(m->vcpu, KVM_GET_REGS, &after) == 0 && memcmp(&before, &after, sizeof(after)) == 0);
   assert(daze_kvm_machine_sync_refresh(m) == DAZE_KVM_MACHINE_OK);
@@ -181,6 +266,7 @@ int main(void) {
   registers(&m);
   snapshots(&m);
   ports(&m);
+  debugging(&m);
   daze_kvm_machine_destroy(&m);
   daze_kvm_machine_destroy(&m);
   daze_kvm_machine_destroy(NULL);

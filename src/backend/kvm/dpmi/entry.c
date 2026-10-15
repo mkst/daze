@@ -256,7 +256,7 @@ static int mediator_pio(const DazeKvmDpmiEntryResult *result) {
 static int timed_kvm_run(DazeKvmMachine *machine, unsigned kind) {
   DazeRunMetrics *const metrics = machine->run_metrics;
   const uint64_t started = metrics != NULL && metrics->enabled ? monotonic_nanoseconds() : 0;
-  const int status = ioctl(machine->vcpu, KVM_RUN, 0);
+  const int status = daze_kvm_machine_run(machine);
   if (metrics == NULL || !metrics->enabled) return status;
   const uint64_t finished = monotonic_nanoseconds();
   metrics->kvm_dpmi_run_calls[kind]++;
@@ -277,18 +277,6 @@ static int timed_kvm_run(DazeKvmMachine *machine, unsigned kind) {
       metrics->kvm_dpmi_io_marker_calls[marker]++;
       metrics->kvm_dpmi_io_marker_nanoseconds[marker] += elapsed;
     }
-  }
-  return status;
-}
-
-static int timed_set_guest_debug(DazeKvmMachine *machine, const struct kvm_guest_debug *debug) {
-  DazeRunMetrics *const metrics = machine->run_metrics;
-  const uint64_t started = metrics != NULL && metrics->enabled ? monotonic_nanoseconds() : 0;
-  const int status = ioctl(machine->vcpu, KVM_SET_GUEST_DEBUG, debug);
-  if (metrics != NULL && metrics->enabled) {
-    const uint64_t finished = monotonic_nanoseconds();
-    metrics->kvm_dpmi_debug_update_calls++;
-    if (finished >= started) metrics->kvm_dpmi_debug_update_nanoseconds += finished - started;
   }
   return status;
 }
@@ -315,7 +303,7 @@ static int layout_valid(const DazeKvmMachine *machine, const DazeKvmRunnerDpmiHa
 
 static int clear_guest_debug(DazeKvmMachine *machine) {
   const struct kvm_guest_debug disabled = {0};
-  return timed_set_guest_debug(machine, &disabled);
+  return daze_kvm_machine_set_guest_debug(machine, &disabled);
 }
 
 static void observe_exit(const DazeKvmMachine *machine, const struct kvm_run *run,
@@ -533,7 +521,7 @@ int daze_kvm_dpmi_entry_run(DazeKvmMachine *machine, const DazeKvmRunnerDpmiHand
   struct kvm_guest_debug debug = {.control = KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_USE_HW_BP};
   debug.arch.debugreg[0] = layout->terminal_linear;
   debug.arch.debugreg[7] = 3;
-  if (timed_set_guest_debug(machine, &debug) < 0) return DAZE_KVM_DPMI_ENTRY_FAILED;
+  if (daze_kvm_machine_set_guest_debug(machine, &debug) < 0) return DAZE_KVM_DPMI_ENTRY_FAILED;
   for (size_t index = 0; index < layout->write_count; ++index) {
     const DazeKvmGuestWrite *write = layout->writes + index;
     memcpy((uint8_t *)machine->guest + write->address, write->bytes, write->size);
@@ -646,7 +634,7 @@ static int continue_to_linear(DazeKvmMachine *machine, uint32_t linear,
   struct kvm_guest_debug debug = {.control = KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_USE_HW_BP};
   debug.arch.debugreg[0] = linear;
   debug.arch.debugreg[7] = 3;
-  if (timed_set_guest_debug(machine, &debug) < 0) return DAZE_KVM_DPMI_ENTRY_FAILED;
+  if (daze_kvm_machine_set_guest_debug(machine, &debug) < 0) return DAZE_KVM_DPMI_ENTRY_FAILED;
   if (timed_kvm_run(machine, DAZE_RUN_METRICS_DPMI_RUN_CONTINUE_TO_LINEAR) < 0) {
     result->observation.kind = DAZE_KVM_DPMI_ENTRY_EXIT_RUN_FAILED;
     result->observation.run_error = errno;

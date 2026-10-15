@@ -112,6 +112,7 @@ typedef struct {
   uint64_t kvm_dpmi_mediator_capture_elisions;
   uint64_t kvm_dpmi_debug_update_calls;
   uint64_t kvm_dpmi_debug_update_nanoseconds;
+  uint64_t kvm_debug_update_elisions;
   uint64_t kvm_guest_virtual_interrupt_calls[2];
   uint64_t kvm_guest_descriptor_calls[3];
   uint64_t kvm_guest_vector_queries;

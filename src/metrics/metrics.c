@@ -261,6 +261,9 @@ void daze_metrics_report_run(const DazeRunMetrics *metrics) {
                 ? 0.0
                 : (double)metrics->kvm_dpmi_mediator_nanoseconds /
                     metrics->kvm_dpmi_mediator_calls / 1000.0);
+      if (metrics->kvm_debug_update_elisions != 0)
+        fprintf(stderr, "metrics: kvm-debug-update-elisions=%" PRIu64 "\n",
+                metrics->kvm_debug_update_elisions);
       if (metrics->kvm_rm_procedure_calls != 0) {
         static const char *const cost_names[DAZE_RUN_METRICS_RM_COST_COUNT] = {"date-2ah",
                                                                                "time-2ch", "other"};

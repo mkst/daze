@@ -135,6 +135,8 @@ int daze_kvm_runner_gate_frame_reply(DazeKvmMachine *machine, const DazeKvmRunne
   daze_write_u16((uint8_t *)machine->guest + flags_address, daze_read_u16(reply + 14));
   /* Use raw SETs: downstream ioctl installs bypass pending sync writes, which the next
    * KVM_RUN could otherwise overwrite. */
+  if (es_changed || !restores_ax || memcmp(&before, &regs, sizeof(regs)) != 0)
+    daze_kvm_machine_debug_invalidate(machine);
   if ((es_changed && ioctl(machine->vcpu, KVM_SET_SREGS, &sregs) != 0) ||
       ((!restores_ax || memcmp(&before, &regs, sizeof(regs)) != 0) &&
        ioctl(machine->vcpu, KVM_SET_REGS, &regs) != 0)) {
@@ -165,6 +167,7 @@ int daze_kvm_runner_gate_frame_retire_out(DazeKvmMachine *machine) {
   const uint8_t *bytes = (const uint8_t *)machine->guest + linear;
   if (bytes[0] != 0xe6 || bytes[1] != DAZE_PORT_GATE) return DAZE_KVM_RUNNER_GATE_RESUME_INVALID;
   regs.rip += 2;
+  daze_kvm_machine_debug_invalidate(machine);
   return ioctl(machine->vcpu, KVM_SET_REGS, &regs) < 0 ? DAZE_KVM_RUNNER_GATE_RESUME_FAILED
                                                        : DAZE_KVM_RUNNER_GATE_RESUME_OK;
 }
@@ -174,6 +177,7 @@ int daze_kvm_runner_gate_frame_set_ds(DazeKvmMachine *machine, uint16_t ds) {
   struct kvm_sregs sregs;
   if (ioctl(machine->vcpu, KVM_GET_SREGS, &sregs) < 0) return DAZE_KVM_RUNNER_GATE_RESUME_FAILED;
   real_data_segment(&sregs.ds, ds);
+  daze_kvm_machine_debug_invalidate(machine);
   return ioctl(machine->vcpu, KVM_SET_SREGS, &sregs) < 0 ? DAZE_KVM_RUNNER_GATE_RESUME_FAILED
                                                          : DAZE_KVM_RUNNER_GATE_RESUME_OK;
 }
@@ -198,7 +202,7 @@ int daze_kvm_runner_gate_resume_hlt(const DazeKvmRunnerGateResumeInput *input,
     return DAZE_KVM_RUNNER_GATE_RESUME_INVALID;
   if (daze_kvm_runner_gate_reply(input) != DAZE_KVM_RUNNER_GATE_RESUME_OK)
     return DAZE_KVM_RUNNER_GATE_RESUME_INVALID;
-  if (ioctl(input->machine->vcpu, KVM_RUN, 0) < 0 ||
+  if (daze_kvm_machine_run(input->machine) < 0 ||
       ((const struct kvm_run *)input->machine->run)->exit_reason != KVM_EXIT_HLT) {
     return DAZE_KVM_RUNNER_GATE_RESUME_FAILED;
   }

@@ -5,6 +5,9 @@
 #undef daze_kvm_machine_get_regs
 #undef daze_kvm_machine_get_sregs
 
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include <assert.h>
 #include <fcntl.h>
 #include <stdlib.h>

@@ -1,4 +1,5 @@
 #include "machine.h"
+#include "machine_access.h"
 #include "machine_private.h"
 #include "monotonic_clock.h"
 #include <stdlib.h>
@@ -179,6 +180,44 @@ int daze_kvm_machine_init(DazeKvmMachine *m, size_t n) {
 int daze_kvm_machine_compiled(void) {
   return 1;
 }
+void daze_kvm_machine_debug_invalidate(DazeKvmMachine *machine) {
+  machine->debug_breakpoint_known = 0;
+  machine->debug_io_exit = 0;
+}
+int daze_kvm_machine_set_guest_debug(DazeKvmMachine *machine, const struct kvm_guest_debug *debug) {
+  if (machine == NULL || machine->vcpu < 0 || debug == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+  struct kvm_guest_debug breakpoint = {.control = KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_USE_HW_BP};
+  breakpoint.arch.debugreg[0] = debug->arch.debugreg[0];
+  breakpoint.arch.debugreg[7] = 3;
+  /* Single-step and exception-injection requests have effects even when repeated. */
+  const int cacheable = memcmp(debug, &breakpoint, sizeof(breakpoint)) == 0;
+  DazeRunMetrics *const metrics = machine->run_metrics;
+  if (cacheable && machine->debug_breakpoint_known && machine->debug_io_exit &&
+      machine->debug_breakpoint == breakpoint.arch.debugreg[0]) {
+    if (metrics != NULL && metrics->enabled) metrics->kvm_debug_update_elisions++;
+    return 0;
+  }
+  const uint64_t started = metrics != NULL && metrics->enabled ? monotonic_nanoseconds() : 0;
+  const int status = ioctl(machine->vcpu, KVM_SET_GUEST_DEBUG, debug);
+  if (metrics != NULL && metrics->enabled) {
+    const uint64_t finished = monotonic_nanoseconds();
+    metrics->kvm_dpmi_debug_update_calls++;
+    if (finished >= started) metrics->kvm_dpmi_debug_update_nanoseconds += finished - started;
+  }
+  machine->debug_breakpoint_known = status == 0 && cacheable;
+  if (machine->debug_breakpoint_known) machine->debug_breakpoint = breakpoint.arch.debugreg[0];
+  return status;
+}
+int daze_kvm_machine_run(DazeKvmMachine *machine) {
+  const int status = ioctl(machine->vcpu, KVM_RUN, 0);
+  machine->debug_io_exit =
+    status == 0 && ((const struct kvm_run *)machine->run)->exit_reason == KVM_EXIT_IO;
+  if (!machine->debug_io_exit) machine->debug_breakpoint_known = 0;
+  return status;
+}
 /* Sync reads are valid only after a completed KVM_RUN; see machine_access.h. */
 int daze_kvm_machine_get_regs(DazeKvmMachine *m, struct kvm_regs *regs) {
   if (m == NULL || regs == NULL || m->vcpu < 0 || m->run == NULL) return DAZE_KVM_MACHINE_INVALID;
@@ -202,6 +241,7 @@ int daze_kvm_machine_get_sregs(DazeKvmMachine *m, struct kvm_sregs *sregs) {
 }
 int daze_kvm_machine_set_regs(DazeKvmMachine *m, const struct kvm_regs *regs) {
   if (m == NULL || regs == NULL || m->vcpu < 0 || m->run == NULL) return DAZE_KVM_MACHINE_INVALID;
+  daze_kvm_machine_debug_invalidate(m);
   if ((m->sync_regs_mask & KVM_SYNC_X86_REGS) != 0) {
     struct kvm_run *run = m->run;
     run->s.regs.regs = *regs;
@@ -215,6 +255,7 @@ int daze_kvm_machine_set_regs(DazeKvmMachine *m, const struct kvm_regs *regs) {
 }
 int daze_kvm_machine_set_sregs(DazeKvmMachine *m, const struct kvm_sregs *sregs) {
   if (m == NULL || sregs == NULL || m->vcpu < 0 || m->run == NULL) return DAZE_KVM_MACHINE_INVALID;
+  daze_kvm_machine_debug_invalidate(m);
   if ((m->sync_regs_mask & KVM_SYNC_X86_SREGS) != 0) {
     struct kvm_run *run = m->run;
     run->s.regs.sregs = *sregs;
@@ -283,6 +324,7 @@ int daze_kvm_machine_snapshot_restore(DazeKvmMachine *machine,
       snapshot->guest_size != machine->guest_size || daze_kvm_write_batch_pending(machine))
     return DAZE_KVM_MACHINE_INVALID;
   const DazeKvmMachineCpuState *state = snapshot->cpu_state;
+  daze_kvm_machine_debug_invalidate(machine);
   if (ioctl(machine->vcpu, KVM_SET_SREGS, &state->sregs) < 0 ||
       ioctl(machine->vcpu, KVM_SET_REGS, &state->regs) < 0)
     return DAZE_KVM_MACHINE_FAILED;
@@ -296,6 +338,7 @@ int daze_kvm_machine_snapshot_restore(DazeKvmMachine *machine,
 int daze_kvm_machine_set_real_mode(DazeKvmMachine *m, uint16_t cs, uint16_t ip, uint16_t ss,
                                    uint16_t sp, uint16_t ds, uint16_t es) {
   if (!m || !m->guest || (uint32_t)cs * 16 + ip >= m->guest_size) return DAZE_KVM_MACHINE_INVALID;
+  daze_kvm_machine_debug_invalidate(m);
   struct kvm_sregs s;
   if (ioctl(m->vcpu, KVM_GET_SREGS, &s) < 0) return DAZE_KVM_MACHINE_FAILED;
   s.cs = seg(cs);
@@ -314,6 +357,7 @@ int daze_kvm_machine_set_real_mode(DazeKvmMachine *m, uint16_t cs, uint16_t ip, 
 int daze_kvm_machine_set_general_registers(DazeKvmMachine *m, uint16_t ax, uint16_t bx, uint16_t cx,
                                            uint16_t dx, uint16_t si, uint16_t di) {
   if (m == NULL) return DAZE_KVM_MACHINE_INVALID;
+  daze_kvm_machine_debug_invalidate(m);
   struct kvm_regs regs;
   if (ioctl(m->vcpu, KVM_GET_REGS, &regs) < 0) return DAZE_KVM_MACHINE_FAILED;
   regs.rax = ax;
@@ -329,7 +373,7 @@ int daze_kvm_machine_run_port_access(DazeKvmMachine *m, DazeKvmPortAccess *acces
   if (!m || !m->run || !access) return DAZE_KVM_MACHINE_INVALID;
   DazeRunMetrics *const metrics = m->run_metrics;
   const uint64_t started = metrics != NULL && metrics->enabled ? monotonic_nanoseconds() : 0;
-  const int run_status = ioctl(m->vcpu, KVM_RUN, 0);
+  const int run_status = daze_kvm_machine_run(m);
   if (metrics != NULL && metrics->enabled) {
     const uint64_t finished = monotonic_nanoseconds();
     metrics->kvm_port_run_calls++;
