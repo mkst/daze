@@ -22,6 +22,7 @@ typedef struct {
   void *(*mmap)(void *addr, size_t length, int prot, int flags, int fd, long offset);
   int (*munmap)(void *addr, size_t length);
   int (*close)(int fd);
+  int (*madvise)(void *addr, size_t length, int advice);
 } DazeKvmMachineSeam;
 
 typedef struct {

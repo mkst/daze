@@ -51,6 +51,40 @@ static int sys_close(const DazeKvmMachineSeam *seam, int fd) {
   return close(fd);
 }
 
+static void *guest_mmap(const DazeKvmMachineSeam *seam, size_t size) {
+  const size_t alignment = 2 * 1024 * 1024;
+  const int flags = MAP_PRIVATE | MAP_ANONYMOUS;
+  const char *setting = getenv("DAZE_KVM_HUGEPAGES");
+  if ((setting != NULL && strcmp(setting, "0") == 0) || (seam != NULL && seam->madvise == NULL) ||
+      size < alignment || size % alignment != 0 || size > SIZE_MAX - alignment)
+    return sys_mmap(seam, NULL, size, PROT_READ | PROT_WRITE, flags, -1, 0);
+
+  const size_t reserved = size + alignment;
+  const int saved_errno = errno;
+  void *const raw = sys_mmap(seam, NULL, reserved, PROT_READ | PROT_WRITE, flags, -1, 0);
+  if (raw != MAP_FAILED) {
+    const size_t prefix = (alignment - (uintptr_t)raw % alignment) % alignment;
+    const size_t suffix = alignment - prefix;
+    void *const guest = (uint8_t *)raw + prefix;
+    if (prefix != 0 && sys_munmap(seam, raw, prefix) != 0) {
+      sys_munmap(seam, raw, reserved);
+    } else if (sys_munmap(seam, (uint8_t *)guest + size, suffix) != 0) {
+      sys_munmap(seam, guest, size + suffix);
+    } else {
+      /* Advice is optional: unavailable THPs must not reject a usable guest mapping. */
+      if (seam != NULL)
+        seam->madvise(guest, size, MADV_HUGEPAGE);
+      else
+        madvise(guest, size, MADV_HUGEPAGE);
+      errno = saved_errno;
+      return guest;
+    }
+  }
+  void *const guest = sys_mmap(seam, NULL, size, PROT_READ | PROT_WRITE, flags, -1, 0);
+  if (guest != MAP_FAILED) errno = saved_errno;
+  return guest;
+}
+
 static void destroy_with_seam(DazeKvmMachine *m, const DazeKvmMachineSeam *seam) {
   if (!m) return;
   if (m->guest && m->guest != MAP_FAILED) sys_munmap(seam, m->guest, m->guest_size);
@@ -109,7 +143,7 @@ DazeKvmMachineInitResult daze_kvm_machine_init_with_seam(DazeKvmMachine *m, size
     m->run_size = (size_t)raw_size;
   }
   m->run = sys_mmap(seam, 0, m->run_size, PROT_READ | PROT_WRITE, MAP_SHARED, m->vcpu, 0);
-  m->guest = sys_mmap(seam, 0, n, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  m->guest = guest_mmap(seam, n);
   if (m->run == MAP_FAILED) {
     result.stage = DAZE_KVM_MACHINE_STAGE_RUN_MMAP;
     goto fail;
