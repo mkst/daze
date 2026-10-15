@@ -21,8 +21,12 @@
 #include "rm_entry.h"
 #include "write_batch.h"
 
-int daze_kvm_rm_entry_install(DazeKvmMachine *machine, uint32_t epilogue) {
+int daze_kvm_rm_entry_install(DazeKvmMachine *machine, uint32_t epilogue, uint32_t ldt_address,
+                              size_t ldt_size) {
   if (epilogue == 0) return 1;
+  if (machine == NULL || ldt_size < 16 || ldt_size > 0x10000 || ldt_size % 8 != 0 ||
+      !daze_kvm_range_fits(machine->guest_size, ldt_address, ldt_size))
+    return 0;
   _Static_assert(sizeof(native_entry_code) <= DAZE_KVM_RM_ENTRY_CONTROL - DAZE_KVM_RM_ENTRY_LINEAR,
                  "entry code stays below control state");
   _Static_assert(sizeof(native_low_code) <= DAZE_KVM_RM_ENTRY_PARKED - DAZE_KVM_RM_ENTRY_LOW_LINEAR,
@@ -30,6 +34,12 @@ int daze_kvm_rm_entry_install(DazeKvmMachine *machine, uint32_t epilogue) {
   uint8_t control[DAZE_KVM_RM_ENTRY_CONTROL_SIZE] = {0};
   daze_write_u32(control + 0x30, epilogue);
   daze_write_u32(control + 0x68, DAZE_KVM_RM_ENTRY_SIGNATURE);
+  const char *setting = getenv("DAZE_KVM_GUEST_DESCRIPTORS");
+  if (setting == NULL || strcmp(setting, "0") != 0) {
+    /* The mediator targets its configured LDT, independently of the cached LDTR. */
+    daze_write_u32(control + DAZE_KVM_RM_ENTRY_LDT_OFFSET, ldt_address);
+    daze_write_u32(control + DAZE_KVM_RM_ENTRY_LDT_LAST_OFFSET, (uint32_t)ldt_size - 8);
+  }
   return daze_kvm_machine_write(machine, DAZE_KVM_RM_ENTRY_LINEAR, native_entry_code,
                                 sizeof(native_entry_code)) &&
          daze_kvm_machine_write(machine, DAZE_KVM_RM_ENTRY_LOW_LINEAR, native_low_code,

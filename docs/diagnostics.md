@@ -35,6 +35,28 @@ Unicorn retains its per-emulation instruction guard. To bound elapsed time,
 use host process cancellation or an external timeout (for example,
 `timeout 60s ./build/debug/daze --backend kvm --mount "$work_dir" TOOL.EXE`).
 
+## KVM guest descriptor services
+
+The normal protected gate handles valid DPMI 0007h/0008h/0009h descriptor
+updates in the guest. Rejected requests retain the host path.
+`--metrics` reports completed guest updates as `kvm-guest-descriptors`;
+`kvm-dpmi-functions` counts hosted requests. Set `DAZE_KVM_GUEST_DESCRIPTORS=0`
+to route all three services through the host for comparison.
+
+## KVM guest memory backing
+
+KVM requests transparent huge pages for its aligned guest memory mapping.
+Unavailable huge pages or failed advice retain ordinary-page operation.
+Set `DAZE_KVM_HUGEPAGES=0` to use the original allocation policy:
+
+```sh
+DAZE_KVM_HUGEPAGES=0 ./build/debug/daze --backend kvm --mount "$work_dir" TOOL.EXE
+```
+
+Huge pages can reduce host/KVM page faults, but may increase resident memory
+and allocation latency under memory pressure. No reserved huge-page pool or
+host kernel configuration change is required.
+
 ## File write buffering
 
 Regular output files use a 16 KiB write buffer on both backends. Set the host

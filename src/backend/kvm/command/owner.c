@@ -1536,8 +1536,9 @@ static int continue_from_handoff(DazeKvmCommandOwnerHandoff *handoff,
         result->transition_status = DAZE_KVM_TRANSITION_WRITER_OK;
       }
       if (result->transition_status == DAZE_KVM_TRANSITION_WRITER_OK) {
-        if (gate != NULL &&
-            !daze_kvm_rm_entry_install(&machine, gate_artifacts.rm_entry_epilogue)) {
+        if (gate != NULL && !daze_kvm_rm_entry_install(&machine, gate_artifacts.rm_entry_epilogue,
+                                                       input->transition_layout.ldt_address,
+                                                       DAZE_DPMI_TRANSITION_LDT_SIZE)) {
           result->transition_status = DAZE_KVM_DPMI_ENTRY_INVALID;
           goto out;
         }
@@ -1559,8 +1560,9 @@ static int continue_from_handoff(DazeKvmCommandOwnerHandoff *handoff,
           result->transition_status = DAZE_KVM_DPMI_ENTRY_INVALID;
         } else {
           result->transition_stage = 3;
-          if (gate != NULL &&
-              !daze_kvm_rm_entry_install(&machine, gate_artifacts.rm_entry_epilogue)) {
+          if (gate != NULL && !daze_kvm_rm_entry_install(&machine, gate_artifacts.rm_entry_epilogue,
+                                                         input->transition_layout.ldt_address,
+                                                         DAZE_DPMI_TRANSITION_LDT_SIZE)) {
             result->transition_status = DAZE_KVM_DPMI_ENTRY_INVALID;
             goto out;
           }

@@ -460,7 +460,30 @@ static void native_binding_contract(void) {
   daze_dpmi_descriptor_encode(guest + k_dpmi_gdt_address + 0x28, 0x2000, 0xffff, 0x9b, 0);
   daze_dpmi_descriptor_encode(guest + k_dpmi_gdt_address + 0x50, 0, 0xfffff, 0x9b, 12);
   daze_dpmi_descriptor_encode(guest + k_dpmi_gdt_address + 0x58, 0, 0xfffff, 0x93, 12);
-  assert(daze_kvm_rm_entry_install(&machine, 0) && daze_kvm_rm_entry_install(&machine, 0xfde87e));
+  assert(!daze_kvm_rm_entry_install(NULL, 1, 0, 16));
+  const size_t bad_ldt_sizes[] = {8, 0x10008, 17};
+  for (size_t i = 0; i < sizeof(bad_ldt_sizes) / sizeof(bad_ldt_sizes[0]); ++i)
+    assert(!daze_kvm_rm_entry_install(&machine, 1, 0, bad_ldt_sizes[i]));
+  assert(!daze_kvm_rm_entry_install(&machine, 1, k_memory_size - 8, 16));
+  assert(setenv("DAZE_KVM_GUEST_DESCRIPTORS", "0", 1) == 0);
+  assert(daze_kvm_rm_entry_install(&machine, 1, k_dpmi_ldt_address, 0x10000));
+  assert(daze_read_u32(guest + 0x5870) == 0);
+  assert(setenv("DAZE_KVM_GUEST_DESCRIPTORS", "1", 1) == 0);
+  assert(daze_kvm_rm_entry_install(&machine, 1, k_dpmi_ldt_address, 0x10000));
+  assert(daze_read_u32(guest + 0x586c) == k_dpmi_ldt_address &&
+         daze_read_u32(guest + 0x5870) == 0xfff8);
+  assert(unsetenv("DAZE_KVM_GUEST_DESCRIPTORS") == 0);
+  assert(daze_kvm_rm_entry_install(&machine, 0, 0, 0) &&
+         daze_kvm_rm_entry_install(&machine, 0xfde87e, k_dpmi_ldt_address, 0x10000));
+  DazeRunMetrics metrics = {.enabled = 1};
+  machine.run_metrics = &metrics;
+  for (unsigned i = 0; i < 3; ++i)
+    daze_write_u32(guest + 0x5874 + i * 4, i + 1);
+  daze_kvm_rm_entry_sync_metrics(&machine);
+  daze_kvm_rm_entry_sync_metrics(&machine);
+  for (unsigned i = 0; i < 3; ++i)
+    assert(metrics.kvm_guest_descriptor_calls[i] == i + 1);
+  machine.run_metrics = NULL;
   daze_write_u16(guest + 0xfdea20, 8);
   for (unsigned kind = 0; kind < 25; ++kind) {
     ParkedState candidate = parked;

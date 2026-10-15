@@ -268,6 +268,9 @@ static void reporting(void) {
   run.kvm_rm_procedure_run_calls = 1;
   run.kvm_guest_virtual_interrupt_calls[0] = 3;
   run.kvm_guest_virtual_interrupt_calls[1] = 4;
+  run.kvm_guest_descriptor_calls[0] = 5;
+  run.kvm_guest_descriptor_calls[1] = 6;
+  run.kvm_guest_descriptor_calls[2] = 7;
   run.kvm_rm_procedure_run_nanoseconds = 2000000;
   run.kvm_rm_procedure_setup_nanoseconds = 500000;
   run.kvm_rm_procedure_resume_nanoseconds = 500000;
@@ -277,6 +280,14 @@ static void reporting(void) {
   capture(1, NULL, &run, NULL);
   has("KVM_RUN=1/2.000ms/2000.0us");
   has("kvm-guest-virtual-interrupts 0900h=3 0901h=4");
+  has("kvm-guest-descriptors 0007h=5 0008h=6 0009h=7");
+  run.kvm_guest_descriptor_calls[0] = 0;
+  capture(1, NULL, &run, NULL);
+  has("kvm-guest-descriptors 0007h=0 0008h=6 0009h=7");
+  run.kvm_guest_descriptor_calls[1] = 0;
+  capture(1, NULL, &run, NULL);
+  has("kvm-guest-descriptors 0007h=0 0008h=0 0009h=7");
+  run.kvm_guest_descriptor_calls[2] = 0;
   run.kvm_guest_virtual_interrupt_calls[0] = 0;
   capture(1, NULL, &run, NULL);
   has("kvm-guest-virtual-interrupts 0900h=0 0901h=4");

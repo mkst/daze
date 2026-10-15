@@ -920,6 +920,12 @@ if(BUILD_TESTING)
   daze_register_simple_contract_test(kvm-protected-execution-contract kvm_protected_execution_contract_test)
   set_tests_properties(kvm-protected-execution-contract PROPERTIES
     SKIP_RETURN_CODE 77 LABELS "local;contract;requires-kvm" TIMEOUT 10)
+  add_executable(kvm_descriptor_contract_test backend/kvm/gate/descriptor_contract_test.c)
+  daze_configure_c11_pedantic_target(kvm_descriptor_contract_test PRIVATE)
+  target_link_libraries(kvm_descriptor_contract_test PRIVATE daze_kvm_protected_gate daze_kvm_rm_procedure)
+  daze_register_simple_contract_test(kvm-descriptor-contract kvm_descriptor_contract_test)
+  set_tests_properties(kvm-descriptor-contract PROPERTIES
+    SKIP_RETURN_CODE 77 LABELS "local;contract;requires-kvm" TIMEOUT 10)
   daze_configure_c11_pedantic_target(kvm_legacy_exception_contract_test PRIVATE)
   target_link_libraries(kvm_legacy_exception_contract_test PRIVATE daze_kvm_protected_gate)
   add_test(NAME kvm-legacy-exception-contract COMMAND kvm_legacy_exception_contract_test)

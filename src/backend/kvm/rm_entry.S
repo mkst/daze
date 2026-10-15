@@ -5,7 +5,14 @@
 .equ PS, 0x2a00
 .equ RM, 0x2a80
 .equ CTRL, 0x5800
+.equ REC, 0xfdea00
+.equ MAIL, 0xfdea40
 native_entry:
+  cmp word ptr fs:[REC], 7
+  jb callback_entry
+  cmp word ptr fs:[REC], 9
+  jbe descriptor_entry
+callback_entry:
   mov fs:[PS], eax
   mov fs:[PS+4], ebx
   mov fs:[PS+8], ecx
@@ -263,6 +270,102 @@ fallback:
   mov esi, fs:[PS+16]
   mov edi, fs:[PS+20]
   mov eax, fs:[PS]
+  out 0xf4, al
+  jmp dword ptr fs:[CTRL+0x30]
+
+descriptor_entry:
+  /* The host mediator writes physical guest RAM. */
+  mov eax, cr0
+  test eax, 0x80000000
+  jnz descriptor_fallback
+  mov edi, fs:[CTRL+0x70]
+  test edi, edi
+  jz descriptor_fallback
+  movzx edx, word ptr fs:[REC+4]
+  test dl, 4
+  jz descriptor_fallback
+  and edx, 0xfff8
+  jz descriptor_fallback
+  cmp edx, edi
+  ja descriptor_fallback
+  add edx, fs:[CTRL+0x6c]
+  movzx eax, word ptr fs:[REC]
+  mov ecx, fs:[REC+8]
+  cmp ax, 7
+  je descriptor_base
+  cmp ax, 8
+  je descriptor_limit
+  test ch, 0x10
+  jnz descriptor_fallback
+  test cl, 0x10
+  jz descriptor_fallback
+  test cl, 0x60
+  jnz descriptor_fallback
+  mov al, cl
+  and al, 0x88
+  cmp al, 0x88
+  jne descriptor_rights_valid
+  mov al, cl
+  and al, 6
+  cmp al, 2
+  jne descriptor_fallback
+descriptor_rights_valid:
+  mov byte ptr fs:[edx+5], cl
+  mov al, fs:[edx+6]
+  and al, 0x0f
+  and ch, 0xf0
+  or al, ch
+  mov byte ptr fs:[edx+6], al
+  inc dword ptr fs:[CTRL+0x7c]
+  jmp descriptor_reply
+descriptor_base:
+  mov eax, fs:[REC+12]
+  mov word ptr fs:[edx+2], ax
+  mov byte ptr fs:[edx+4], cl
+  mov byte ptr fs:[edx+7], ch
+  inc dword ptr fs:[CTRL+0x74]
+  jmp descriptor_reply
+descriptor_limit:
+  shl ecx, 16
+  mov cx, fs:[REC+12]
+  mov al, fs:[edx+6]
+  and al, 0x70
+  cmp ecx, 0xfffff
+  jbe descriptor_limit_valid
+  mov edi, ecx
+  and edi, 0xfff
+  cmp edi, 0xfff
+  jne descriptor_fallback
+  shr ecx, 12
+  or al, 0x80
+descriptor_limit_valid:
+  mov word ptr fs:[edx], cx
+  shr ecx, 16
+  or al, cl
+  mov byte ptr fs:[edx+6], al
+  inc dword ptr fs:[CTRL+0x78]
+descriptor_reply:
+  mov dword ptr fs:[CTRL], 0
+  mov eax, fs:[REC]
+  mov fs:[MAIL], eax
+  mov eax, fs:[REC+4]
+  mov fs:[MAIL+4], eax
+  mov eax, fs:[REC+8]
+  mov fs:[MAIL+8], eax
+  mov eax, fs:[REC+24]
+  mov fs:[MAIL+12], eax
+  mov eax, fs:[REC+16]
+  mov fs:[MAIL+16], eax
+  mov eax, fs:[REC+40]
+  shl eax, 16
+  mov ax, fs:[REC+20]
+  mov fs:[MAIL+20], eax
+  mov eax, fs:[REC+12]
+  mov fs:[MAIL+24], eax
+  mov dword ptr fs:[MAIL+28], 0
+  jmp dword ptr fs:[CTRL+0x30]
+descriptor_fallback:
+  mov al, 0x31
   out 0xf4, al
   jmp dword ptr fs:[CTRL+0x30]
 

@@ -401,6 +401,13 @@ void daze_metrics_report_run(const DazeRunMetrics *metrics) {
       fprintf(stderr, "metrics: kvm-guest-virtual-interrupts 0900h=%" PRIu64 " 0901h=%" PRIu64 "\n",
               metrics->kvm_guest_virtual_interrupt_calls[0],
               metrics->kvm_guest_virtual_interrupt_calls[1]);
+    if (metrics->kvm_guest_descriptor_calls[0] != 0 ||
+        metrics->kvm_guest_descriptor_calls[1] != 0 || metrics->kvm_guest_descriptor_calls[2] != 0)
+      fprintf(stderr,
+              "metrics: kvm-guest-descriptors 0007h=%" PRIu64 " 0008h=%" PRIu64 " 0009h=%" PRIu64
+              "\n",
+              metrics->kvm_guest_descriptor_calls[0], metrics->kvm_guest_descriptor_calls[1],
+              metrics->kvm_guest_descriptor_calls[2]);
     fprintf(stderr,
             "metrics: kvm-boundary-broker=%" PRIu64 " dos=%" PRIu64 " dpmi-entry=%" PRIu64
             " other=%" PRIu64 " service=%.3fms average=%.1fus\n",
