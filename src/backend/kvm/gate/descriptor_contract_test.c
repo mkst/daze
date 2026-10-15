@@ -200,8 +200,166 @@ static int run_case(uint16_t function, uint32_t operand, uint16_t rights, unsign
   return 0;
 }
 
+static int vector_case(unsigned kind) {
+  DazeKvmMachine machine;
+  int status = daze_kvm_machine_init(&machine, 0x1000000);
+  if (status == DAZE_KVM_MACHINE_UNAVAILABLE) return 77;
+  CHECK(status == DAZE_KVM_MACHINE_OK);
+  current_machine = &machine;
+  current_run = machine.run;
+  uint8_t *guest = machine.guest;
+  uint8_t *control = guest + DAZE_KVM_RM_ENTRY_CONTROL;
+  DazeRunMetrics metrics = {.enabled = 1};
+  machine.run_metrics = &metrics;
+  const DazeKvmProtectedGateLayout layout = {.idt_address = 0xfdf800,
+                                             .idt_limit = 0x7ff,
+                                             .handler_address = 0xfde800,
+                                             .dos_handler_address = 0xfde900,
+                                             .default_dos_stub_address = 0xfde9c8,
+                                             .record_address = 0xfdea00,
+                                             .mailbox_address = 0xfdea40,
+                                             .handler_selector = 0x50,
+                                             .handler_data_selector = 0x58,
+                                             .interrupt_gate_type = 0x8e,
+                                             .exchange_limit = 1,
+                                             .rm_entry_address = 0x5000};
+  DazeKvmProtectedGateArtifacts artifacts;
+  CHECK(daze_kvm_protected_gate_build(&layout, &artifacts));
+  CHECK(daze_kvm_machine_write(&machine, layout.handler_address, artifacts.handler,
+                               artifacts.handler_size));
+  CHECK(daze_kvm_machine_write(&machine, layout.idt_address + 0x31 * 8, artifacts.idt_entry, 8));
+  CHECK(setenv("DAZE_KVM_GUEST_VECTORS", kind == 8 ? "0" : "1", 1) == 0);
+  CHECK(daze_kvm_rm_entry_install(&machine, artifacts.rm_entry_epilogue, 0xfe0000, 0x10000));
+  CHECK(unsetenv("DAZE_KVM_GUEST_VECTORS") == 0);
+  DazeKvmDpmiMediator mediator = {.guest = guest,
+                                  .guest_size = machine.guest_size,
+                                  .record_address = 0xfdea00,
+                                  .mailbox_address = 0xfdea40};
+  const unsigned index = kind == 0 ? 0 : kind == 1 ? 255 : 0x21;
+  mediator.default_interrupt_vectors[index] =
+    (DazeDpmiInterruptVector){.segment = 0x58, .offset = 0x12345678};
+  if (kind == 3)
+    mediator.interrupt_vectors[index] =
+      (DazeDpmiInterruptVector){.segment = 0x84, .offset = 0x89abcdef};
+  if (kind == 4) mediator.default_interrupt_vectors[index] = (DazeDpmiInterruptVector){0};
+  if (kind == 9) daze_write_u32(control + DAZE_KVM_RM_ENTRY_SIGNATURE_OFFSET, 0);
+  if (kind == 10)
+    mediator.interrupt_vectors[index] = (DazeDpmiInterruptVector){.offset = 0x87654321};
+  if (kind == 11) mediator.interrupt_vectors[index] = (DazeDpmiInterruptVector){.segment = 0x84};
+  daze_kvm_rm_entry_publish_vectors(&mediator);
+  if (kind == 2 || kind == 3) {
+    DazeDpmiLinearMemory memory = {0};
+    mediator.linear_memory = &memory;
+    mediator.ldt_address = 0xfe0000;
+    mediator.ldt_size = 0x10000;
+    daze_write_u32(guest + 0xfdea00, 0x0205);
+    daze_write_u32(guest + 0xfdea04, index);
+    daze_write_u32(guest + 0xfdea08, kind == 2 ? 0x84 : 0);
+    daze_write_u32(guest + 0xfdea0c, kind == 2 ? 0x89abcdef : 0);
+    daze_write_u32(guest + 0xfdea20, 8);
+    daze_write_u32(guest + 0xfdea24, 2);
+    CHECK(daze_kvm_dpmi_mediator_process(&mediator, 0xf4, 0x31) == DAZE_KVM_DPMI_MEDIATOR_OK);
+    mediator.linear_memory = NULL;
+  }
+  if (kind == 7) {
+    DazeKvmMachineSnapshot snapshot = {0};
+    CHECK(daze_kvm_machine_snapshot_take(&machine, &snapshot) == DAZE_KVM_MACHINE_OK);
+    memset(control + DAZE_KVM_RM_ENTRY_VECTOR_TABLE_OFFSET, 0,
+           DAZE_KVM_RM_ENTRY_VECTOR_ENABLED_OFFSET + 4 - DAZE_KVM_RM_ENTRY_VECTOR_TABLE_OFFSET);
+    CHECK(daze_kvm_machine_snapshot_restore(&machine, &snapshot) == DAZE_KVM_MACHINE_OK);
+    daze_kvm_machine_snapshot_dispose(&snapshot);
+  }
+  if (kind == 5) daze_write_u32(control + DAZE_KVM_RM_ENTRY_VECTOR_VALID_OFFSET, 0);
+  daze_dpmi_descriptor_encode(guest + 0xff0008, 0, 0xfffff, 0x9b, 0xc);
+  daze_dpmi_descriptor_encode(guest + 0xff0010, 0, 0xffff, 0x93, 0);
+  daze_dpmi_descriptor_encode(guest + 0xff0050, 0, 0xfffff, 0x9b, 0xc);
+  daze_dpmi_descriptor_encode(guest + 0xff0058, 0, 0xfffff, 0x93, 0xc);
+  daze_dpmi_descriptor_encode(guest + 0xfe0080, 0x50000, 0xffff, 0x93, 0);
+  const uint8_t client[] = {0xcd, 0x31, 0xe6, 0x77, 0xf4}; /* int 31h; out 77h,al; hlt */
+  memcpy(guest + 0x8000, client, sizeof(client));
+  struct kvm_sregs s;
+  CHECK(ioctl(machine.vcpu, KVM_GET_SREGS, &s) == 0);
+  s.cr0 = 0x11;
+  s.cr3 = s.cr4 = s.efer = 0;
+  s.gdt.base = 0xff0000;
+  s.gdt.limit = 0xffff;
+  s.idt.base = layout.idt_address;
+  s.idt.limit = layout.idt_limit;
+  s.cs = segment(8, 0, UINT32_MAX, 1, 1);
+  s.ds = s.es = s.ss = s.gs = segment(0x10, 0, 0xffff, 0, 0);
+  s.fs = segment(0x58, 0, UINT32_MAX, 0, 1);
+  s.ldt = (struct kvm_segment){
+    .selector = 0x30, .base = 0xfe0000, .limit = 0xffff, .type = 2, .present = 1};
+  if (kind == 13) s.fs = segment(0x84, 0x50000, 0xffff, 0, 0);
+  if (kind == 6) {
+    s.cr0 |= UINT64_C(0x80000000);
+    s.cr3 = 0xe00000;
+    s.cr4 = 0x10;
+    for (unsigned i = 0; i < 4; i++)
+      daze_write_u32(guest + 0xe00000 + i * 4, (i << 22) | 0x83);
+  }
+  const struct kvm_regs initial = {.rax = 0x11220204,
+                                   .rbx = 0x3344be00 | index,
+                                   .rcx = 0x55667788,
+                                   .rdx = 0x99aabbcc,
+                                   .rsi = 0x12345678,
+                                   .rdi = 0xabcdef98,
+                                   .rbp = 0x44443333,
+                                   .rsp = kind == 12 ? 0x20 : 0x9000,
+                                   .rip = 0x8000,
+                                   .rflags = 0xad7};
+  CHECK(ioctl(machine.vcpu, KVM_SET_SREGS, &s) == 0);
+  CHECK(ioctl(machine.vcpu, KVM_SET_REGS, &initial) == 0);
+  CHECK(ioctl(machine.vcpu, KVM_RUN, 0) == 0);
+  CHECK(current_run->exit_reason == KVM_EXIT_IO);
+  if (kind == 5 || kind == 6 || kind == 8 || kind == 9) {
+    CHECK(current_run->io.port == 0xf4);
+    CHECK(daze_read_u32(control + DAZE_KVM_RM_ENTRY_VECTOR_COUNT_OFFSET) == 0);
+  } else {
+    CHECK(current_run->io.port == 0x77);
+    struct kvm_regs actual;
+    CHECK(ioctl(machine.vcpu, KVM_GET_REGS, &actual) == 0);
+    uint16_t selector = kind == 2 || kind == 11 ? 0x84 : kind == 4 || kind == 10 ? 0 : 0x58;
+    uint32_t offset = kind == 2                 ? 0x89abcdef
+                      : kind == 10              ? 0x87654321
+                      : kind == 4 || kind == 11 ? 0
+                                                : 0x12345678;
+    CHECK(actual.rax == initial.rax && actual.rbx == initial.rbx);
+    CHECK(actual.rcx == ((initial.rcx & 0xffff0000) | selector) && actual.rdx == offset);
+    CHECK(actual.rsi == initial.rsi && actual.rdi == initial.rdi && actual.rbp == initial.rbp &&
+          actual.rsp == initial.rsp);
+    CHECK(actual.rflags == (initial.rflags & ~UINT64_C(1)));
+    CHECK(daze_read_u32(control + DAZE_KVM_RM_ENTRY_VECTOR_COUNT_OFFSET) == 1);
+    CHECK(ioctl(machine.vcpu, KVM_GET_SREGS, &s) == 0);
+    CHECK(s.ds.selector == 0x10 && s.es.selector == 0x10 && s.gs.selector == 0x10 &&
+          s.fs.selector == (kind == 13 ? 0x84 : 0x58));
+  }
+  const uint64_t queries = kind == 5 || kind == 6 || kind == 8 || kind == 9 ? 0 : 1;
+  if (kind == 14) {
+    metrics.enabled = 0;
+    daze_kvm_rm_entry_sync_metrics(&machine);
+    CHECK(daze_read_u32(control + DAZE_KVM_RM_ENTRY_VECTOR_COUNT_OFFSET) == 1);
+    metrics.enabled = 1;
+    CHECK(daze_kvm_rm_entry_install(&machine, artifacts.rm_entry_epilogue, 0xfe0000, 0x10000));
+    CHECK(daze_read_u32(control + DAZE_KVM_RM_ENTRY_VECTOR_VALID_OFFSET) == 0);
+  }
+  daze_kvm_rm_entry_sync_metrics(&machine);
+  daze_kvm_rm_entry_sync_metrics(&machine);
+  CHECK(metrics.kvm_guest_vector_queries == queries);
+  CHECK(daze_read_u32(control + DAZE_KVM_RM_ENTRY_VECTOR_COUNT_OFFSET) == 0);
+  daze_kvm_machine_destroy(&machine);
+  current_machine = NULL;
+  current_run = NULL;
+  case_number++;
+  return 0;
+}
+
 int main(void) {
   CHECK(unsetenv("DAZE_KVM_GUEST_DESCRIPTORS") == 0);
+  for (unsigned kind = 0; kind < 15; ++kind) {
+    int status = vector_case(kind);
+    if (status != 0) return status;
+  }
   for (unsigned kind = 0; kind < 18; ++kind) {
     int status = run_case(kind == 8 || kind == 14 ? 9 : 7, 0x76543210, 0x93, kind);
     if (status) return status;

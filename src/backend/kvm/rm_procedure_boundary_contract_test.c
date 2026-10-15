@@ -483,6 +483,54 @@ static void native_binding_contract(void) {
   daze_kvm_rm_entry_sync_metrics(&machine);
   for (unsigned i = 0; i < 3; ++i)
     assert(metrics.kvm_guest_descriptor_calls[i] == i + 1);
+  uint8_t *control = guest + DAZE_KVM_RM_ENTRY_CONTROL;
+  DazeKvmDpmiMediator vectors = {.guest = guest,
+                                 .guest_size = machine.guest_size,
+                                 .record_address = 0xfdea00,
+                                 .mailbox_address = 0xfdea40};
+  vectors.default_interrupt_vectors[0x21] =
+    (DazeDpmiInterruptVector){.segment = 0x50, .offset = 0x1c8};
+  vectors.interrupt_vectors[1].segment = 0x84;
+  vectors.interrupt_vectors[2].offset = 0xdeadbeef;
+  vectors.default_interrupt_vectors[1] = vectors.default_interrupt_vectors[0x21];
+  vectors.default_interrupt_vectors[2] = vectors.default_interrupt_vectors[0x21];
+  daze_kvm_rm_entry_publish_vectors(NULL);
+  for (unsigned kind = 0; kind < 7; ++kind) {
+    DazeKvmDpmiMediator bad = vectors;
+    daze_write_u32(control + DAZE_KVM_RM_ENTRY_VECTOR_VALID_OFFSET, 0);
+    daze_write_u32(control + DAZE_KVM_RM_ENTRY_SIGNATURE_OFFSET, DAZE_KVM_RM_ENTRY_SIGNATURE);
+    daze_write_u32(control + DAZE_KVM_RM_ENTRY_VECTOR_ENABLED_OFFSET, 1);
+    if (kind == 0) bad.guest = NULL;
+    if (kind == 1) bad.record_address++;
+    if (kind == 2) bad.mailbox_address++;
+    if (kind == 3) bad.guest_size = DAZE_KVM_RM_ENTRY_CONTROL + DAZE_KVM_RM_ENTRY_CONTROL_SIZE - 1;
+    if (kind == 4) daze_write_u32(control + DAZE_KVM_RM_ENTRY_SIGNATURE_OFFSET, 0);
+    if (kind == 5) daze_write_u32(control + DAZE_KVM_RM_ENTRY_VECTOR_ENABLED_OFFSET, 0);
+    if (kind == 6) daze_write_u32(control + DAZE_KVM_RM_ENTRY_VECTOR_ENABLED_OFFSET, 2);
+    daze_kvm_rm_entry_publish_vectors(&bad);
+    assert(daze_read_u32(control + DAZE_KVM_RM_ENTRY_VECTOR_VALID_OFFSET) == 0);
+  }
+  daze_write_u32(control + DAZE_KVM_RM_ENTRY_VECTOR_ENABLED_OFFSET, 1);
+  daze_kvm_rm_entry_publish_vectors(&vectors);
+  assert(daze_read_u32(control + DAZE_KVM_RM_ENTRY_VECTOR_VALID_OFFSET) ==
+         DAZE_KVM_RM_ENTRY_VECTOR_SIGNATURE);
+  uint8_t *table = control + DAZE_KVM_RM_ENTRY_VECTOR_TABLE_OFFSET;
+  assert(daze_read_u16(table) == 0 && daze_read_u32(table + 2) == 0);
+  assert(daze_read_u16(table + 6) == 0x84 && daze_read_u32(table + 8) == 0);
+  assert(daze_read_u16(table + 12) == 0 && daze_read_u32(table + 14) == 0xdeadbeef);
+  assert(daze_read_u16(table + 6 * 0x21) == 0x50 && daze_read_u32(table + 6 * 0x21 + 2) == 0x1c8);
+  daze_write_u32(control + DAZE_KVM_RM_ENTRY_VECTOR_COUNT_OFFSET, 5);
+  daze_kvm_rm_entry_sync_metrics(&machine);
+  daze_kvm_rm_entry_sync_metrics(&machine);
+  assert(metrics.kvm_guest_vector_queries == 5);
+  assert(setenv("DAZE_KVM_GUEST_VECTORS", "0", 1) == 0);
+  assert(daze_kvm_rm_entry_install(&machine, 1, k_dpmi_ldt_address, 0x10000));
+  daze_kvm_rm_entry_publish_vectors(&vectors);
+  assert(daze_read_u32(control + DAZE_KVM_RM_ENTRY_VECTOR_VALID_OFFSET) == 0);
+  assert(daze_read_u32(control + DAZE_KVM_RM_ENTRY_VECTOR_ENABLED_OFFSET) == 0);
+  assert(unsetenv("DAZE_KVM_GUEST_VECTORS") == 0);
+  assert(daze_kvm_rm_entry_install(&machine, 1, k_dpmi_ldt_address, 0x10000));
+  assert(daze_read_u32(control + DAZE_KVM_RM_ENTRY_VECTOR_ENABLED_OFFSET) == 1);
   machine.run_metrics = NULL;
   daze_write_u16(guest + 0xfdea20, 8);
   for (unsigned kind = 0; kind < 25; ++kind) {

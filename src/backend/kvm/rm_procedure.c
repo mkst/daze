@@ -32,6 +32,7 @@ int daze_kvm_rm_entry_install(DazeKvmMachine *machine, uint32_t epilogue, uint32
   _Static_assert(sizeof(native_low_code) <= DAZE_KVM_RM_ENTRY_PARKED - DAZE_KVM_RM_ENTRY_LOW_LINEAR,
                  "low entry code stays below parked state");
   uint8_t control[DAZE_KVM_RM_ENTRY_CONTROL_SIZE] = {0};
+  daze_kvm_rm_entry_sync_metrics(machine);
   daze_write_u32(control + 0x30, epilogue);
   daze_write_u32(control + 0x68, DAZE_KVM_RM_ENTRY_SIGNATURE);
   const char *setting = getenv("DAZE_KVM_GUEST_DESCRIPTORS");
@@ -40,6 +41,9 @@ int daze_kvm_rm_entry_install(DazeKvmMachine *machine, uint32_t epilogue, uint32
     daze_write_u32(control + DAZE_KVM_RM_ENTRY_LDT_OFFSET, ldt_address);
     daze_write_u32(control + DAZE_KVM_RM_ENTRY_LDT_LAST_OFFSET, (uint32_t)ldt_size - 8);
   }
+  setting = getenv("DAZE_KVM_GUEST_VECTORS");
+  if (setting == NULL || strcmp(setting, "0") != 0)
+    daze_write_u32(control + DAZE_KVM_RM_ENTRY_VECTOR_ENABLED_OFFSET, 1);
   return daze_kvm_machine_write(machine, DAZE_KVM_RM_ENTRY_LINEAR, native_entry_code,
                                 sizeof(native_entry_code)) &&
          daze_kvm_machine_write(machine, DAZE_KVM_RM_ENTRY_LOW_LINEAR, native_low_code,

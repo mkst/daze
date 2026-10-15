@@ -1,4 +1,5 @@
 #include "mediator.h"
+#include "rm_entry.h"
 
 #include "dpmi_error.h"
 #include "dpmi_function.h"
@@ -516,6 +517,7 @@ DazeKvmDpmiMediatorStatus daze_kvm_dpmi_mediator_process(DazeKvmDpmiMediator *me
     daze_dpmi_request_set_interrupt_vector(
       &request, mediator->interrupt_vectors,
       sizeof(mediator->interrupt_vectors) / sizeof(mediator->interrupt_vectors[0]), &result);
+    if (result.success) daze_kvm_rm_entry_publish_vectors(mediator);
     break;
   case DAZE_DPMI_GET_STATE_SAVE:
     request.state_buffer_size = mediator->state_save_endpoints.state_buffer_size;

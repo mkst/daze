@@ -7,7 +7,13 @@
 .equ CTRL, 0x5800
 .equ REC, 0xfdea00
 .equ MAIL, 0xfdea40
+.equ VECTOR_TABLE, CTRL+0x80
+.equ VECTOR_COUNT, CTRL+0x680
+.equ VECTOR_VALID, CTRL+0x684
+.equ VECTOR_SIGNATURE, 0x02040204
 native_entry:
+  cmp word ptr fs:[REC], 0x204
+  je vector_entry
   cmp word ptr fs:[REC], 7
   jb callback_entry
   cmp word ptr fs:[REC], 9
@@ -273,6 +279,14 @@ fallback:
   out 0xf4, al
   jmp dword ptr fs:[CTRL+0x30]
 
+vector_entry:
+  cmp dword ptr fs:[VECTOR_VALID], VECTOR_SIGNATURE
+  jne callback_entry
+  mov eax, cr0
+  test eax, 0x80000000
+  jnz callback_entry
+  jmp descriptor_reply
+
 descriptor_entry:
   /* The host mediator writes physical guest RAM. */
   mov eax, cr0
@@ -363,6 +377,18 @@ descriptor_reply:
   mov eax, fs:[REC+12]
   mov fs:[MAIL+24], eax
   mov dword ptr fs:[MAIL+28], 0
+  cmp word ptr fs:[REC], 0x204
+  jne vector_reply_done
+  movzx edx, byte ptr fs:[REC+4]
+  lea edx, [edx+edx*2]
+  shl edx, 1
+  mov eax, fs:[REC+8]
+  mov ax, fs:[edx+VECTOR_TABLE]
+  mov fs:[MAIL+8], eax
+  mov eax, fs:[edx+VECTOR_TABLE+2]
+  mov fs:[MAIL+24], eax
+  inc dword ptr fs:[VECTOR_COUNT]
+vector_reply_done:
   jmp dword ptr fs:[CTRL+0x30]
 descriptor_fallback:
   mov al, 0x31

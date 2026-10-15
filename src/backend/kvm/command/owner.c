@@ -353,6 +353,7 @@ static DazeKvmDpmiMediator mediator_for_gate(DazeKvmMachine *machine,
    * selector:offset pair. */
   mediator.default_interrupt_vectors[DAZE_INT_DOS] =
     daze_kvm_command_owner_default_vector21(layout);
+  daze_kvm_rm_entry_publish_vectors(&mediator);
   return mediator;
 }
 
@@ -954,6 +955,18 @@ static int resume_exec_parent(DazeKvmCommandOwnerHandoff *handoff,
   return DAZE_KVM_COMMAND_OWNER_POSTSTART_FAILED;
 }
 
+static int continue_raw_switch(DazeKvmMachine *machine, uint32_t linear, unsigned legacy_depth,
+                               DazeKvmDpmiEntryResult *boundary) {
+  if (machine == NULL || machine->guest == NULL ||
+      !daze_kvm_range_fits(machine->guest_size, linear, 1)) {
+    if (boundary != NULL) *boundary = (DazeKvmDpmiEntryResult){0};
+    return DAZE_KVM_DPMI_ENTRY_INVALID;
+  }
+  /* Active legacy exception delivery owns a return breakpoint. */
+  return legacy_depth ? daze_kvm_dpmi_entry_continue_to_linear(machine, linear, boundary)
+                      : daze_kvm_dpmi_entry_continue_once(machine, boundary);
+}
+
 static int
 dispatch_boundaries(DazeKvmCommandOwnerHandoff *handoff, const DazeKvmCommandOwnerInput *input,
                     const DazeKvmTransitionPlanInput *plan_input,
@@ -1283,9 +1296,9 @@ dispatch_boundaries(DazeKvmCommandOwnerHandoff *handoff, const DazeKvmCommandOwn
           daze_kvm_raw_switch_gate_return_to_protected(machine, raw_gate, &layout, &raw.request);
         const int continue_status =
           return_status == DAZE_KVM_RAW_SWITCH_GATE_OK
-            ? daze_kvm_dpmi_entry_continue_to_linear(
+            ? continue_raw_switch(
                 machine, ((uint32_t)preflight->dpmi_handoff.caller_return_cs << 4) + raw.request.di,
-                &boundary)
+                legacy.depth, &boundary)
             : DAZE_KVM_DPMI_ENTRY_INVALID;
         if (getenv("DAZE_EXEC_TRACE") != NULL)
           fprintf(stderr,
@@ -1300,9 +1313,8 @@ dispatch_boundaries(DazeKvmCommandOwnerHandoff *handoff, const DazeKvmCommandOwn
           return DAZE_KVM_COMMAND_OWNER_POSTSTART_FAILED;
         }
       } else {
-        if (daze_kvm_dpmi_entry_continue_to_linear(machine,
-                                                   ((uint32_t)raw.request.si << 4) + raw.request.di,
-                                                   &boundary) != DAZE_KVM_DPMI_ENTRY_OK) {
+        if (continue_raw_switch(machine, ((uint32_t)raw.request.si << 4) + raw.request.di,
+                                legacy.depth, &boundary) != DAZE_KVM_DPMI_ENTRY_OK) {
           return DAZE_KVM_COMMAND_OWNER_POSTSTART_FAILED;
         }
       }

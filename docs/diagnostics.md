@@ -43,6 +43,14 @@ updates in the guest. Rejected requests retain the host path.
 `kvm-dpmi-functions` counts hosted requests. Set `DAZE_KVM_GUEST_DESCRIPTORS=0`
 to route all three services through the host for comparison.
 
+## KVM guest vector queries
+
+The normal protected gate handles DPMI 0204h queries in the guest using the
+resolved software vectors. Setters remain hosted. `--metrics` reports guest
+queries as `kvm-guest-vector-queries`; `kvm-dpmi-functions` counts hosted
+requests. Set `DAZE_KVM_GUEST_VECTORS=0` to use hosted queries for comparison.
+Missing cached state and paged guests retain the host path.
+
 ## KVM guest memory backing
 
 KVM requests transparent huge pages for its aligned guest memory mapping.
