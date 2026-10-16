@@ -39,6 +39,12 @@ Unicorn retains its per-emulation instruction guard. To bound elapsed time,
 use host process cancellation or an external timeout (for example,
 `timeout 60s ./build/debug/daze --backend kvm --mount "$work_dir" TOOL.EXE`).
 
+## KVM capture retirement
+
+Legacy #NP capture retires its pending OUT using `KVM_CAP_IMMEDIATE_EXIT` when
+available; other kernels retain the breakpoint rendezvous. `kvm-io-drain` reports
+completion-only calls, time and failures separately from guest-executing runs.
+
 ## KVM guest descriptor services
 
 The normal protected gate handles valid DPMI 0006h/0007h/0008h/0009h/000Ch descriptor

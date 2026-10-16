@@ -187,6 +187,13 @@ static void reporting(void) {
   has("debug-update=1/1.000ms/1000.0us mediator=0/0.000ms/0.0us");
   has("metrics: kvm-debug-update-elisions=2");
   lacks("kvm-rm-procedure total");
+  lacks("kvm-io-drain=");
+  run.kvm_io_drain_calls = 3;
+  run.kvm_io_drain_nanoseconds = 2000000;
+  run.kvm_io_drain_failures = 1;
+  capture(1, NULL, &run, NULL);
+  has("kvm-io-drain=3 time=2.000ms failures=1 (completion only; no guest execution)");
+  run.kvm_io_drain_calls = 0;
   run.kvm_gate_frame_capture_calls = 0;
   run.kvm_gate_frame_capture_nanoseconds = 0;
   run.kvm_gate_frame_reply_calls = 1;

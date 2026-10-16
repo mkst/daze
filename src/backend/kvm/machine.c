@@ -125,11 +125,17 @@ DazeKvmMachineInitResult daze_kvm_machine_init_with_seam(DazeKvmMachine *m, size
     result.stage = DAZE_KVM_MACHINE_STAGE_VM;
     goto fail;
   }
-  /* The injected ioctl seam omits the capability probe; sync is enabled only for real
+  /* The injected ioctl seam omits the sync probe; sync is enabled only for real
    * machines. */
   if (seam == NULL) {
     const int mask = ioctl(m->kvm, KVM_CHECK_EXTENSION, KVM_CAP_SYNC_REGS);
     if (mask > 0) m->sync_regs_mask = mask & (KVM_SYNC_X86_REGS | KVM_SYNC_X86_SREGS);
+  }
+  {
+    const int saved_errno = errno;
+    m->immediate_exit_supported =
+      sys_ioctl(seam, m->kvm, KVM_CHECK_EXTENSION, (void *)(uintptr_t)KVM_CAP_IMMEDIATE_EXIT) > 0;
+    errno = saved_errno;
   }
   if ((m->vcpu = sys_ioctl(seam, m->vm, KVM_CREATE_VCPU, 0)) < 0) {
     result.stage = DAZE_KVM_MACHINE_STAGE_VCPU;
@@ -156,6 +162,7 @@ DazeKvmMachineInitResult daze_kvm_machine_init_with_seam(DazeKvmMachine *m, size
   } else {
     m->sync_regs_mask = 0;
   }
+  if (m->run_size < sizeof(struct kvm_run)) m->immediate_exit_supported = 0;
   if (m->guest == MAP_FAILED) {
     result.stage = DAZE_KVM_MACHINE_STAGE_GUEST_MMAP;
     goto fail;
@@ -217,6 +224,35 @@ int daze_kvm_machine_run(DazeKvmMachine *machine) {
     status == 0 && ((const struct kvm_run *)machine->run)->exit_reason == KVM_EXIT_IO;
   if (!machine->debug_io_exit) machine->debug_breakpoint_known = 0;
   return status;
+}
+int daze_kvm_machine_drain_io(DazeKvmMachine *machine) {
+  if (machine == NULL || machine->vcpu < 0 || machine->run == NULL ||
+      machine->run_size < sizeof(struct kvm_run) || !machine->immediate_exit_supported) {
+    errno = EINVAL;
+    return DAZE_KVM_MACHINE_INVALID;
+  }
+  struct kvm_run *run = machine->run;
+  if (run->immediate_exit || run->kvm_dirty_regs) {
+    errno = EBUSY;
+    return DAZE_KVM_MACHINE_INVALID;
+  }
+  DazeRunMetrics *const metrics = machine->run_metrics;
+  const uint64_t started = metrics != NULL && metrics->enabled ? monotonic_nanoseconds() : 0;
+  run->immediate_exit = 1;
+  const int status = daze_kvm_machine_run(machine);
+  const int error = errno;
+  run->immediate_exit = 0;
+  const int completed = status == -1 && error == EINTR;
+  if (metrics != NULL && metrics->enabled) {
+    metrics->kvm_io_drain_calls++;
+    metrics->kvm_io_drain_nanoseconds += monotonic_nanoseconds() - started;
+    metrics->kvm_io_drain_failures += !completed;
+  }
+  if (!completed) {
+    errno = status == 0 ? EPROTO : error;
+    return DAZE_KVM_MACHINE_FAILED;
+  }
+  return DAZE_KVM_MACHINE_OK;
 }
 /* Sync reads are valid only after a completed KVM_RUN; see machine_access.h. */
 int daze_kvm_machine_get_regs(DazeKvmMachine *m, struct kvm_regs *regs) {

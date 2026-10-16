@@ -12,6 +12,9 @@ void daze_kvm_machine_debug_invalidate(DazeKvmMachine *machine);
 /* These two helpers retain ioctl's 0/-1 return convention and errno. */
 int daze_kvm_machine_set_guest_debug(DazeKvmMachine *machine, const struct kvm_guest_debug *debug);
 int daze_kvm_machine_run(DazeKvmMachine *machine);
+/* Complete a pending I/O operation without guest execution. On success, use raw
+ * ioctls or replace saved CPU state; exit_reason and sync output are not a new exit. */
+int daze_kvm_machine_drain_io(DazeKvmMachine *machine);
 
 /* Sync reads are valid after a completed KVM_RUN; sync writes take effect on the next
  * run. Raw ioctl installs leave the shared area stale. Refresh it or read with ioctls

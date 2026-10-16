@@ -196,6 +196,12 @@ void daze_metrics_report_run(const DazeRunMetrics *metrics) {
                 : (double)metrics->kvm_gate_frame_reply_nanoseconds /
                     metrics->kvm_gate_frame_reply_calls / 1000.0);
     }
+    if (metrics->kvm_io_drain_calls != 0)
+      fprintf(stderr,
+              "metrics: kvm-io-drain=%" PRIu64 " time=%.3fms failures=%" PRIu64
+              " (completion only; no guest execution)\n",
+              metrics->kvm_io_drain_calls, (double)metrics->kvm_io_drain_nanoseconds / 1000000.0,
+              metrics->kvm_io_drain_failures);
     static const char *const run_names[DAZE_RUN_METRICS_DPMI_RUN_COUNT] = {
       "entry", "continue-once", "continue-observe", "continue-to-linear"};
     static const char *const exit_names[DAZE_RUN_METRICS_KVM_EXIT_COUNT] = {"debug", "io", "hlt",

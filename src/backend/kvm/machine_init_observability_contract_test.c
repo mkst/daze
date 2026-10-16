@@ -37,6 +37,7 @@ typedef struct {
   int all_guest_maps_fail;
   int trim_fail_call;
   int advice_fail;
+  int immediate_exit;
 } ShimPlan;
 
 static ShimPlan plan;
@@ -71,6 +72,10 @@ static int shim_ioctl(int fd, unsigned long request, void *arg) {
       return -1;
     }
     return next_fd();
+  case KVM_CHECK_EXTENSION:
+    if ((uintptr_t)arg != KVM_CAP_IMMEDIATE_EXIT) abort();
+    if (plan.immediate_exit < 0) errno = EIO;
+    return plan.immediate_exit;
   case KVM_CREATE_VCPU:
     if (plan.fail_create_vcpu) {
       errno = plan.ioctl_errno;
@@ -359,6 +364,20 @@ static void check_row(const char *name, DazeKvmMachineInitResult result, const D
 }
 
 int main(void) {
+  for (unsigned kind = 0; kind < 4; ++kind) {
+    reset_plan();
+    plan.immediate_exit = kind == 0 ? -1 : kind == 1 ? 0 : 1;
+    if (kind == 3) plan.run_mmap_size = sizeof(struct kvm_run) - 1;
+    DazeKvmMachine machine;
+    const DazeKvmMachineInitResult result =
+      daze_kvm_machine_init_with_seam(&machine, 0x1000, &seam);
+    if (result.status != DAZE_KVM_MACHINE_OK || machine.immediate_exit_supported != (kind == 2)) {
+      fprintf(stderr, "immediate-exit probe case=%u status=%d supported=%d\n", kind, result.status,
+              machine.immediate_exit_supported);
+      test_failures++;
+    }
+    daze_kvm_machine_destroy(&machine);
+  }
   hugepage_contract();
   DazeKvmMachine m;
 
@@ -403,7 +422,7 @@ int main(void) {
   plan.fail_create_vcpu = 1;
   plan.ioctl_errno = EIO;
   {
-    const int calls[C_COUNT] = {1, 3, 0, 0, 2};
+    const int calls[C_COUNT] = {1, 4, 0, 0, 2};
     check_row("create-vCPU failure", daze_kvm_machine_init_with_seam(&m, 0x1000, &seam), &m,
               DAZE_KVM_MACHINE_FAILED, DAZE_KVM_MACHINE_STAGE_VCPU, EIO, calls, SHAPE_DESTROYED);
   }
@@ -411,7 +430,7 @@ int main(void) {
   reset_plan();
   plan.mmap_size_zero = 1;
   {
-    const int calls[C_COUNT] = {1, 4, 0, 0, 3};
+    const int calls[C_COUNT] = {1, 5, 0, 0, 3};
     check_row("run-map size zero", daze_kvm_machine_init_with_seam(&m, 0x1000, &seam), &m,
               DAZE_KVM_MACHINE_FAILED, DAZE_KVM_MACHINE_STAGE_MMAP_SIZE, 0, calls, SHAPE_DESTROYED);
   }
@@ -420,7 +439,7 @@ int main(void) {
   plan.mmap_size_fail = 1;
   plan.ioctl_errno = EIO;
   {
-    const int calls[C_COUNT] = {1, 4, 0, 0, 3};
+    const int calls[C_COUNT] = {1, 5, 0, 0, 3};
     check_row("run-map size raw ioctl -1", daze_kvm_machine_init_with_seam(&m, 0x1000, &seam), &m,
               DAZE_KVM_MACHINE_FAILED, DAZE_KVM_MACHINE_STAGE_MMAP_SIZE, EIO, calls,
               SHAPE_DESTROYED);
@@ -430,7 +449,7 @@ int main(void) {
   plan.run_mmap_fail = 1;
   plan.mmap_errno = ENOMEM;
   {
-    const int calls[C_COUNT] = {1, 4, 2, 1, 3};
+    const int calls[C_COUNT] = {1, 5, 2, 1, 3};
     check_row("run mmap failure", daze_kvm_machine_init_with_seam(&m, 0x1000, &seam), &m,
               DAZE_KVM_MACHINE_FAILED, DAZE_KVM_MACHINE_STAGE_RUN_MMAP, ENOMEM, calls,
               SHAPE_DESTROYED);
@@ -440,7 +459,7 @@ int main(void) {
   plan.guest_mmap_fail = 1;
   plan.mmap_errno = ENOMEM;
   {
-    const int calls[C_COUNT] = {1, 4, 2, 1, 3};
+    const int calls[C_COUNT] = {1, 5, 2, 1, 3};
     check_row("guest mmap failure", daze_kvm_machine_init_with_seam(&m, 0x1000, &seam), &m,
               DAZE_KVM_MACHINE_FAILED, DAZE_KVM_MACHINE_STAGE_GUEST_MMAP, ENOMEM, calls,
               SHAPE_DESTROYED);
@@ -450,14 +469,14 @@ int main(void) {
   plan.fail_region = 1;
   plan.ioctl_errno = EIO;
   {
-    const int calls[C_COUNT] = {1, 5, 2, 2, 3};
+    const int calls[C_COUNT] = {1, 6, 2, 2, 3};
     check_row("region failure", daze_kvm_machine_init_with_seam(&m, 0x1000, &seam), &m,
               DAZE_KVM_MACHINE_FAILED, DAZE_KVM_MACHINE_STAGE_REGION, EIO, calls, SHAPE_DESTROYED);
   }
 
   reset_plan();
   {
-    const int calls[C_COUNT] = {1, 5, 2, 0, 0};
+    const int calls[C_COUNT] = {1, 6, 2, 0, 0};
     DazeKvmMachineInitResult r = daze_kvm_machine_init_with_seam(&m, 0x1000, &seam);
     check_row("seam-driven success", r, &m, DAZE_KVM_MACHINE_OK, DAZE_KVM_MACHINE_STAGE_NONE, 0,
               calls, SHAPE_LIVE);

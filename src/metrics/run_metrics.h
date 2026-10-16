@@ -91,6 +91,9 @@ typedef struct {
    * Its duration includes both KVM_RUN and guest execution between exits. */
   uint64_t kvm_port_run_calls;
   uint64_t kvm_port_run_nanoseconds;
+  uint64_t kvm_io_drain_calls;
+  uint64_t kvm_io_drain_nanoseconds;
+  uint64_t kvm_io_drain_failures;
   /* Register traffic served from the shared kvm_run sync area instead of
    * GET/SET ioctls (see machine_access.h). Zero when unsupported. */
   uint64_t kvm_regs_sync_get_calls;

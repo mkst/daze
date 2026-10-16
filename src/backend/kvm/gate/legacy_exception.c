@@ -14,6 +14,8 @@
 #if defined(__linux__) && (defined(__x86_64__) || defined(__i386__))
 #include <linux/kvm.h>
 #include <sys/ioctl.h>
+#include <errno.h>
+#include <stdio.h>
 
 enum { LOCKED_BASE = k_dpmi_exception_locked_stack_base, CAPTURE_OFFSET = 0x400 };
 static int guest_range(const DazeKvmMachine *machine, uint64_t address, size_t size) {
@@ -178,10 +180,18 @@ int daze_kvm_legacy_exception_boundary(DazeKvmMachine *m, const DazeKvmProtected
     uint8_t frame[16];
     if (!daze_dpmi_exception_frame_build(&input, &linear, frame)) return -1;
     /* Complete KVM's deferred OUT before replacing its interrupted CPU state. */
-    DazeKvmDpmiEntryResult retired;
-    if (daze_kvm_dpmi_entry_continue_to_linear(m, gate->handler_address + CAPTURE_OFFSET + 6,
-                                               &retired) != 0)
-      return -1;
+    if (m->immediate_exit_supported) {
+      const int status = daze_kvm_machine_drain_io(m);
+      if (status != DAZE_KVM_MACHINE_OK) {
+        fprintf(stderr, "KVM legacy capture drain failed: status=%d error=%d\n", status, errno);
+        return -1;
+      }
+    } else {
+      DazeKvmDpmiEntryResult retired;
+      if (daze_kvm_dpmi_entry_continue_to_linear(m, gate->handler_address + CAPTURE_OFFSET + 6,
+                                                 &retired) != 0)
+        return -1;
+    }
     memcpy((uint8_t *)m->guest + linear, frame, 16);
     daze_dpmi_descriptor_encode((uint8_t *)m->guest + s.gdt.base + DAZE_SEL_LOCKED_STACK,
                                 LOCKED_BASE, 0xfff, 0x92, 0);
