@@ -207,6 +207,8 @@ int daze_kvm_normal_transition_config_build(const DazeKvmNormalTransitionConfigI
     colliding_selector = k_gate_data_selector;
   else if (has_gdt_selector(&inventory, k_gate_alias_code_selector))
     colliding_selector = k_gate_alias_code_selector;
+  else if (has_gdt_selector(&inventory, DAZE_SEL_EXCEPTION_RETURN))
+    colliding_selector = DAZE_SEL_EXCEPTION_RETURN;
   if (colliding_selector != 0) {
     set_failure(failure, DAZE_KVM_NORMAL_TRANSITION_CONFIG_BAD_INPUT,
                 (DazeKvmGuestRange){colliding_selector, 0}, k_no_range);
@@ -220,7 +222,11 @@ int daze_kvm_normal_transition_config_build(const DazeKvmNormalTransitionConfigI
                                                   0xfffff, 0x92, 0x0c}) ||
       !add(&inventory, (DazeDpmiTransitionDescriptorAddition){DAZE_DPMI_TRANSITION_GDT,
                                                               k_gate_alias_code_selector,
-                                                              k_gate_base, 0xffff, 0x9a, 0x0c})) {
+                                                              k_gate_base, 0xffff, 0x9a, 0x0c}) ||
+      !add(&inventory, (DazeDpmiTransitionDescriptorAddition){
+                         DAZE_DPMI_TRANSITION_GDT, DAZE_SEL_EXCEPTION_RETURN,
+                         k_dpmi_exception_locked_stack_base,
+                         k_memory_size - k_dpmi_exception_locked_stack_base - 1, 0x9a, 0x04})) {
     set_failure(failure, DAZE_KVM_NORMAL_TRANSITION_CONFIG_BAD_INPUT, k_no_range, k_no_range);
     return 0;
   }

@@ -19,6 +19,7 @@ static const char *const k_owner_names[DAZE_GUEST_OWNER_COUNT] = {
   "DPMI GDT",
   "DPMI LDT",
   "DPMI locked stack",
+  "KVM exception return",
   "DPMI client arena",
   "conventional allocator",
   "KVM runner gate arena",
@@ -54,6 +55,7 @@ int daze_guest_owner_persistent(DazeGuestOwner owner) {
   case DAZE_GUEST_OWNER_DPMI_GDT:
   case DAZE_GUEST_OWNER_DPMI_LDT:
   case DAZE_GUEST_OWNER_DPMI_LOCKED_STACK:
+  case DAZE_GUEST_OWNER_KVM_EXCEPTION_RETURN:
   case DAZE_GUEST_OWNER_KVM_RUNNER_GATE_ARENA:
   case DAZE_GUEST_OWNER_KVM_RUNNER_RECORD:
   case DAZE_GUEST_OWNER_KVM_RUNNER_MAILBOX:
@@ -111,6 +113,8 @@ int daze_guest_layout_add_stable(DazeGuestLayout *layout) {
                    DAZE_GUEST_OWNER_DPMI_LDT) &&
          add_range(layout, k_dpmi_exception_locked_stack_base, k_dpmi_exception_locked_stack_size,
                    DAZE_GUEST_OWNER_DPMI_LOCKED_STACK) &&
+         add_range(layout, k_kvm_exception_return_linear, k_kvm_exception_return_size,
+                   DAZE_GUEST_OWNER_KVM_EXCEPTION_RETURN) &&
          add_range(layout, k_dpmi_rm_return_bridge, k_dpmi_rm_return_bridge_size,
                    DAZE_GUEST_OWNER_KVM_RM_RETURN_BRIDGE) &&
          add_range(layout, k_dpmi_rm_entry_linear, k_dpmi_rm_entry_size,

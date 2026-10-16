@@ -196,6 +196,9 @@ void daze_metrics_report_run(const DazeRunMetrics *metrics) {
                 : (double)metrics->kvm_gate_frame_reply_nanoseconds /
                     metrics->kvm_gate_frame_reply_calls / 1000.0);
     }
+    if (metrics->kvm_exception_guest_returns || metrics->kvm_exception_host_returns)
+      fprintf(stderr, "metrics: kvm-exception-return guest=%" PRIu64 " host=%" PRIu64 "\n",
+              metrics->kvm_exception_guest_returns, metrics->kvm_exception_host_returns);
     if (metrics->kvm_io_drain_calls != 0)
       fprintf(stderr,
               "metrics: kvm-io-drain=%" PRIu64 " time=%.3fms failures=%" PRIu64

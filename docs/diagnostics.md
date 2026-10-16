@@ -45,6 +45,12 @@ Legacy #NP capture retires its pending OUT using `KVM_CAP_IMMEDIATE_EXIT` when
 available; other kernels retain the breakpoint rendezvous. `kvm-io-drain` reports
 completion-only calls, time and failures separately from guest-executing runs.
 
+The KVM legacy exception return helper restores supported caller frames in the
+guest. `kvm-exception-return guest=N host=N` counts completed guest returns and
+host restorations. Tiny or changed stack frames and returns involving raw mode
+switches or real-mode callbacks retain host restoration. Faults inside the
+helper remain failures; they are not treated as a completed client return.
+
 ## KVM guest descriptor services
 
 The normal protected gate handles valid DPMI 0006h/0007h/0008h/0009h/000Ch descriptor

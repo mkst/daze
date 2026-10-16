@@ -201,7 +201,7 @@ int main(void) {
     find_addition(&config, DAZE_DPMI_TRANSITION_GDT, 0x1078);
   const DazeDpmiTransitionDescriptorAddition *dynamic_ldt_data =
     find_addition(&config, DAZE_DPMI_TRANSITION_LDT, 0x1010);
-  if (config.addition_count != 12 || !inventory_unique(&config) || compat == NULL ||
+  if (config.addition_count != 13 || !inventory_unique(&config) || compat == NULL ||
       compat->base != 0x0500 || compat->limit != 7 || compat->access != 0x92 || code == NULL ||
       data == NULL || code->access != 0x9a || data->access != 0x92 || code->flags != 0x0c ||
       data->flags != 0x0c || dynamic == NULL || dynamic->base != 0x107f0 ||
@@ -271,6 +271,12 @@ int main(void) {
   invalid.handoff_ds = 0x0060;
   if (daze_kvm_normal_transition_config_build(&invalid, &unchanged, NULL)) {
     fprintf(stderr, "gate-alias selector collision was accepted\n");
+    return 1;
+  }
+  invalid = normal_input();
+  invalid.handoff_ds = DAZE_SEL_EXCEPTION_RETURN;
+  if (daze_kvm_normal_transition_config_build(&invalid, &unchanged, NULL)) {
+    fprintf(stderr, "exception-return selector collision was accepted\n");
     return 1;
   }
   invalid = normal_input();

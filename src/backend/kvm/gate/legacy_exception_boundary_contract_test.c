@@ -214,7 +214,153 @@ static void boundary_inputs(void) {
   }
 }
 
+static void guest_return_inputs(void) {
+#if defined(__linux__) && (defined(__x86_64__) || defined(__i386__))
+  static uint8_t guest[k_memory_size];
+  DazeRunMetrics metrics = {.enabled = 1};
+  DazeKvmMachine machine = {.guest = guest,
+                            .guest_size = sizeof(guest),
+                            .immediate_exit_supported = 1,
+                            .run_metrics = &metrics};
+  struct kvm_sregs s = {
+    .gdt = {.base = k_dpmi_gdt_address, .limit = 0xffff},
+    .ldt = {.base = k_dpmi_ldt_address, .limit = 0xffff, .present = 1},
+    .ss = {.selector = 0x124, .base = 0x72000, .limit = 0xffff, .type = 3, .s = 1, .present = 1}};
+  uint8_t *code = guest + k_dpmi_gdt_address + DAZE_SEL_EXCEPTION_RETURN;
+  uint8_t *stack = guest + k_dpmi_ldt_address + 0x120;
+  daze_dpmi_descriptor_encode(code, LOCKED_BASE, k_memory_size - LOCKED_BASE - 1, 0x9a, 4);
+  daze_dpmi_descriptor_encode(stack, 0x72000, 0xffff, 0x92, 0);
+  CHECK(prepare_guest_return(&machine, &s, 0x15f, 0xb4, 0xd4));
+  for (unsigned kind = 0; kind < 25; ++kind) {
+    DazeKvmMachine bad = machine;
+    struct kvm_sregs registers = s;
+    uint8_t saved_code[8], saved_stack[8];
+    memcpy(saved_code, code, 8);
+    memcpy(saved_stack, stack, 8);
+    switch (kind) {
+    case 0:
+      bad.immediate_exit_supported = 0;
+      break;
+    case 1:
+      --bad.guest_size;
+      break;
+    case 2:
+      registers.gdt.base = 0;
+      break;
+    case 3:
+      registers.ldt.base = 0;
+      break;
+    case 4:
+      registers.efer = 1u << 10;
+      break;
+    case 5:
+      registers.gdt.limit = 0x67;
+      break;
+    case 6:
+      code[2] ^= 1;
+      break;
+    case 7:
+      code[0] ^= 1;
+      break;
+    case 8:
+      code[5] &= 0x7f;
+      break;
+    case 9:
+      code[5] &= (uint8_t)~0x10;
+      break;
+    case 10:
+      code[5] = 0x92;
+      break;
+    case 11:
+      code[6] &= (uint8_t)~0x40;
+      break;
+    case 12:
+      code[5] |= 0x20;
+      break;
+    case 13:
+      registers.ldt.limit = 0x120;
+      break;
+    case 14:
+      stack[2] ^= 1;
+      break;
+    case 15:
+      stack[0] ^= 1;
+      break;
+    case 16:
+      stack[6] |= 0x40;
+      break;
+    case 17:
+      stack[5] = 0x9a;
+      break;
+    case 18:
+      registers.ss.selector |= 3;
+      break;
+    case 19:
+      registers.cr0 = 1u << 31;
+      break;
+    case 20:
+      stack[5] &= 0x7f;
+      break;
+    case 21:
+      stack[5] &= (uint8_t)~0x10;
+      break;
+    case 22:
+      stack[5] |= 0x20;
+      break;
+    case 23:
+      registers.ss.db = 1;
+      stack[6] |= 0x40;
+      break;
+    case 24:
+      daze_dpmi_descriptor_encode(stack, k_memory_size + 1, 0xffff, 0x92, 0);
+      registers.ss.base = k_memory_size + 1;
+      break;
+    }
+    CHECK(!prepare_guest_return(&bad, &registers, 0x15f, 0xb4, 0xd4));
+    memcpy(code, saved_code, 8);
+    memcpy(stack, saved_stack, 8);
+  }
+  CHECK(!daze_kvm_legacy_exception_guest_return(NULL));
+  DazeKvmLegacyExceptionState state = {
+    .depth = 1, .deliveries = {{.native_return = 1, .frame_linear = LOCKED_BASE + 0xff0}}};
+  CHECK(daze_kvm_legacy_exception_rearm(&machine, &state));
+  daze_kvm_legacy_exception_host_return(&machine, &state);
+  CHECK(daze_read_u32(guest + k_kvm_exception_return_control + 28) == 0);
+  daze_kvm_legacy_exception_host_return(NULL, &state);
+  daze_kvm_legacy_exception_host_return(&machine, NULL);
+  DazeKvmDpmiEntryResult b = {
+    .cs = 0xb4, .ss = 0x124, .observation = {.kind = DAZE_KVM_DPMI_ENTRY_EXIT_PIO}};
+  CHECK(!daze_kvm_legacy_exception_reconcile(NULL, &state, &b));
+  CHECK(!daze_kvm_legacy_exception_reconcile(&machine, NULL, &b));
+  CHECK(!daze_kvm_legacy_exception_reconcile(&machine, &state, NULL));
+  CHECK(daze_kvm_legacy_exception_reconcile(&machine, &state, &b));
+  CHECK(state.depth == 0 && metrics.kvm_exception_guest_returns == 1);
+  state.depth = 1;
+  b.cs = DAZE_SEL_EXCEPTION_RETURN;
+  CHECK(!daze_kvm_legacy_exception_reconcile(&machine, &state, &b) && state.depth == 1);
+  b.cs_base = LOCKED_BASE;
+  b.rip = RETURN_OUT_OFFSET;
+  b.observation.pio_port = DAZE_PORT_GATE;
+  b.observation.pio_direction = DAZE_KVM_DPMI_ENTRY_PIO_OUT;
+  b.observation.pio_size = b.observation.pio_count = b.observation.pio_value_present = 1;
+  b.observation.pio_value = DAZE_KVM_LEGACY_RETURN_MARKER;
+  CHECK(daze_kvm_legacy_exception_reconcile(&machine, &state, &b) && state.depth == 1);
+  b.cs = 0x60;
+  b.ss_base = 0x2000;
+  b.sp = 0x80;
+  b.observation.pio_value = DAZE_KVM_LEGACY_NP_MARKER;
+  daze_write_u16(guest + 0x2086, DAZE_SEL_EXCEPTION_RETURN);
+  CHECK(!daze_kvm_legacy_exception_reconcile(&machine, &state, &b) && state.depth == 1);
+  b.ss_base = UINT32_MAX;
+  CHECK(!daze_kvm_legacy_exception_reconcile(&machine, &state, &b));
+  b.ss_base = 0x2000;
+  daze_write_u16(guest + 0x2086, 8);
+  CHECK(daze_kvm_legacy_exception_reconcile(&machine, &state, &b) && state.depth == 0);
+#endif
+}
+
 int main(void) {
+  guest_return_inputs();
   instruction_inputs();
   boundary_inputs();
   puts("legacy exception boundary: passed");

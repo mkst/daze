@@ -9,8 +9,63 @@
 #include "port.h"
 #include "selector.h"
 #include "guest_memory_layout.h"
+#include "exception_return_code.h"
 #include <string.h>
 #include <stdlib.h>
+
+enum {
+  RETURN_OFFSET = k_kvm_exception_return_linear - k_dpmi_exception_locked_stack_base,
+  RETURN_OUT_OFFSET = RETURN_OFFSET + sizeof(exception_return_code) - 3
+};
+_Static_assert(RETURN_OFFSET == 0xee00 &&
+                 k_kvm_exception_return_control - k_dpmi_exception_locked_stack_base == 0xf100 &&
+                 k_dpmi_exception_locked_stack_sp == 0xff0 && DAZE_KVM_LEGACY_MAX_DEPTH == 1,
+               "exception-return assembly layout");
+
+int daze_kvm_legacy_exception_guest_return(const DazeKvmLegacyExceptionState *state) {
+  return state && state->depth == 1 && state->deliveries[0].native_return;
+}
+
+void daze_kvm_legacy_exception_host_return(DazeKvmMachine *machine,
+                                           const DazeKvmLegacyExceptionState *state) {
+  if (daze_kvm_legacy_exception_guest_return(state) && machine && machine->guest &&
+      daze_kvm_range_fits(machine->guest_size, k_kvm_exception_return_control, 40))
+    daze_write_u32((uint8_t *)machine->guest + k_kvm_exception_return_control + 28, 0);
+}
+
+static int return_marker(const DazeKvmDpmiEntryResult *b) {
+  return b->observation.kind == DAZE_KVM_DPMI_ENTRY_EXIT_PIO &&
+         b->observation.pio_port == DAZE_PORT_GATE &&
+         b->observation.pio_direction == DAZE_KVM_DPMI_ENTRY_PIO_OUT &&
+         b->observation.pio_size == 1 && b->observation.pio_count == 1 &&
+         b->observation.pio_value_present &&
+         b->observation.pio_value == DAZE_KVM_LEGACY_RETURN_MARKER &&
+         b->cs == DAZE_SEL_EXCEPTION_RETURN && b->cs_base == k_dpmi_exception_locked_stack_base &&
+         b->rip == RETURN_OUT_OFFSET;
+}
+
+int daze_kvm_legacy_exception_reconcile(DazeKvmMachine *m, DazeKvmLegacyExceptionState *state,
+                                        const DazeKvmDpmiEntryResult *b) {
+  if (!m || !state || !b || state->depth > DAZE_KVM_LEGACY_MAX_DEPTH) return 0;
+  if (!daze_kvm_legacy_exception_guest_return(state)) return 1;
+  const DazeKvmLegacyExceptionDelivery *d = &state->deliveries[0];
+  if (!m->guest || !daze_kvm_range_fits(m->guest_size, d->frame_linear, 16)) return 0;
+  if (b->cs == DAZE_SEL_EXCEPTION_RETURN) return return_marker(b);
+  /* A fault in the final stack switch/IRET must not become a new client delivery. */
+  if (b->observation.kind == DAZE_KVM_DPMI_ENTRY_EXIT_PIO && b->observation.pio_value_present &&
+      b->observation.pio_value == DAZE_KVM_LEGACY_NP_MARKER) {
+    uint64_t address = (uint64_t)b->ss_base + b->sp;
+    if (address > UINT32_MAX || !daze_kvm_range_fits(m->guest_size, (uint32_t)address, 10) ||
+        daze_read_u16((const uint8_t *)m->guest + address + 6) == DAZE_SEL_EXCEPTION_RETURN)
+      return 0;
+  }
+  if (b->observation.kind == DAZE_KVM_DPMI_ENTRY_EXIT_PIO && b->ss != DAZE_SEL_LOCKED_STACK &&
+      daze_read_u32((const uint8_t *)m->guest + d->frame_linear) == 0) {
+    state->depth = 0;
+    if (m->run_metrics && m->run_metrics->enabled) m->run_metrics->kvm_exception_guest_returns++;
+  }
+  return 1;
+}
 #if defined(__linux__) && (defined(__x86_64__) || defined(__i386__))
 #include <linux/kvm.h>
 #include <sys/ioctl.h>
@@ -54,6 +109,40 @@ static int debug_return(DazeKvmMachine *m, uint32_t linear, int enabled) {
   }
   return daze_kvm_machine_set_guest_debug(m, &debug) == 0;
 }
+
+static int prepare_guest_return(DazeKvmMachine *m, const struct kvm_sregs *s, uint16_t ip,
+                                uint16_t cs, uint16_t target) {
+  struct kvm_segment code, stack;
+  if (!m->immediate_exit_supported || m->guest_size != k_memory_size ||
+      s->gdt.base != k_dpmi_gdt_address || s->ldt.base != k_dpmi_ldt_address ||
+      ((s->efer & (1u << 10)) || (s->cr0 & (1u << 31))) ||
+      !read_segment(m, s, DAZE_SEL_EXCEPTION_RETURN, &code) || code.base != LOCKED_BASE ||
+      code.limit != k_memory_size - LOCKED_BASE - 1 || !code.present || !code.s ||
+      (code.type & 14) != 10 || !code.db || code.dpl ||
+      !read_segment(m, s, s->ss.selector, &stack) || stack.base != s->ss.base ||
+      stack.limit != s->ss.limit || stack.db != s->ss.db || stack.db ||
+      (stack.type & 14) != (s->ss.type & 14) || !stack.present || !stack.s || stack.dpl ||
+      stack.base > m->guest_size || s->ss.selector & 3)
+    return 0;
+  uint64_t address = ((s->ss.selector & 4) ? s->ldt.base : s->gdt.base) + (s->ss.selector & ~7u);
+  if (address < LOCKED_BASE || !guest_range(m, address, 8)) return 0;
+  uint8_t *control = (uint8_t *)m->guest + k_kvm_exception_return_control;
+  memset(control, 0, 40);
+  daze_write_u16(control, ip);
+  daze_write_u16(control + 2, cs);
+  daze_write_u16(control + 4, target);
+  daze_write_u16(control + 6, s->ss.selector);
+  daze_write_u32(control + 8, (uint32_t)(address - LOCKED_BASE));
+  memcpy(control + 12, (const uint8_t *)m->guest + address, 8);
+  control[17] &= (uint8_t)~1u;
+  daze_write_u32(control + 20, (uint32_t)stack.base);
+  daze_write_u32(control + 24, LOCKED_BASE);
+  daze_write_u32(control + 28, 1);
+  daze_write_u16(control + 32, s->gdt.limit);
+  daze_write_u32(control + 34, (uint32_t)s->gdt.base);
+  daze_write_u16(control + 38, s->ldt.selector);
+  return 1;
+}
 int daze_kvm_legacy_exception_install(DazeKvmMachine *m, const DazeKvmProtectedGateLayout *gate) {
   const uint8_t bytes[] = {
     0x66, 0x50,                      /* push ax */
@@ -70,13 +159,19 @@ int daze_kvm_legacy_exception_install(DazeKvmMachine *m, const DazeKvmProtectedG
       !daze_kvm_range_fits(m->guest_size, gate->idt_address + 11 * 8, 8))
     return 0;
   memcpy((uint8_t *)m->guest + capture, bytes, sizeof(bytes));
+  _Static_assert(sizeof(exception_return_code) <= 0x300, "return code stays below control");
+  if (daze_kvm_range_fits(m->guest_size, k_kvm_exception_return_linear,
+                          k_kvm_exception_return_size))
+    memcpy((uint8_t *)m->guest + k_kvm_exception_return_linear, exception_return_code,
+           sizeof(exception_return_code));
   daze_kvm_encode_idt_gate((uint8_t *)m->guest + gate->idt_address + 11 * 8, CAPTURE_OFFSET, 0x60,
                            0x86);
   return 1;
 }
 int daze_kvm_legacy_exception_rearm(DazeKvmMachine *m, const DazeKvmLegacyExceptionState *state) {
   if (m == NULL || state == NULL || state->depth > DAZE_KVM_LEGACY_MAX_DEPTH) return 0;
-  return state->depth == 0 || debug_return(m, state->deliveries[state->depth - 1].return_linear, 1);
+  return state->depth == 0 || daze_kvm_legacy_exception_guest_return(state) ||
+         debug_return(m, state->deliveries[state->depth - 1].return_linear, 1);
 }
 static int instruction(const DazeKvmMachine *m, const struct kvm_sregs *s, uint16_t cs, uint16_t ip,
                        uint16_t error, uint16_t *length) {
@@ -123,6 +218,10 @@ int daze_kvm_legacy_exception_boundary(DazeKvmMachine *m, const DazeKvmProtected
   if (m == NULL || gate == NULL || process == NULL || state == NULL || b == NULL ||
       state->depth > DAZE_KVM_LEGACY_MAX_DEPTH)
     return -1;
+  if (!daze_kvm_legacy_exception_reconcile(m, state, b)) return -1;
+  const int native_return = daze_kvm_legacy_exception_guest_return(state) && return_marker(b) &&
+                            b->ss == DAZE_SEL_LOCKED_STACK &&
+                            b->sp == state->deliveries[0].frame_sp + 2;
   int capture = b->observation.kind == DAZE_KVM_DPMI_ENTRY_EXIT_PIO &&
                 b->observation.pio_port == DAZE_PORT_GATE &&
                 b->observation.pio_direction == DAZE_KVM_DPMI_ENTRY_PIO_OUT &&
@@ -134,6 +233,7 @@ int daze_kvm_legacy_exception_boundary(DazeKvmMachine *m, const DazeKvmProtected
                   b->cs_base + b->rip == state->deliveries[state->depth - 1].return_linear &&
                   b->ss == DAZE_SEL_LOCKED_STACK &&
                   b->sp == state->deliveries[state->depth - 1].frame_sp + 4;
+  returning |= native_return;
   if (!capture && !returning) return 0;
   if (daze_kvm_machine_get_sregs(m, &s) != DAZE_KVM_MACHINE_OK ||
       daze_kvm_machine_get_regs(m, &r) != DAZE_KVM_MACHINE_OK)
@@ -147,12 +247,23 @@ int daze_kvm_legacy_exception_boundary(DazeKvmMachine *m, const DazeKvmProtected
       return -1;
     if (read_segment(m, &s, d->selector, &target) && target.present)
       r.rip = daze_read_u16(frame + 6);
+    if (native_return) {
+      r.rax = (r.rax & ~0xffffull) |
+              daze_read_u16((const uint8_t *)m->guest + s.ss.base + (uint16_t)r.rsp);
+      r.rip = d->return_ip;
+      if (read_segment(m, &s, d->selector, &target) && target.present)
+        r.rip = daze_read_u16(frame + 6);
+      if (!read_segment(m, &s, d->return_cs, &s.cs) ||
+          daze_kvm_machine_drain_io(m) != DAZE_KVM_MACHINE_OK)
+        return -1;
+    }
     s.ss = stack;
     r.rsp = daze_read_u16(frame + 12);
     if (r.rsp > stack.limit) return -1;
     r.rflags = daze_read_u16(frame + 10) | 2;
     --state->depth;
-    if (!debug_return(m, 0, 0)) return -1;
+    if (!native_return && !debug_return(m, 0, 0)) return -1;
+    if (m->run_metrics && m->run_metrics->enabled) m->run_metrics->kvm_exception_host_returns++;
   } else {
     if (state->depth == DAZE_KVM_LEGACY_MAX_DEPTH || s.ss.db || s.cs.selector != 0x60 ||
         s.cs.base != gate->handler_address || !s.cs.db ||
@@ -194,6 +305,11 @@ int daze_kvm_legacy_exception_boundary(DazeKvmMachine *m, const DazeKvmProtected
                                                  &retired) != 0)
         return -1;
     }
+    int native = prepare_guest_return(m, &s, (uint16_t)(ip + length), cs, error);
+    if (native) {
+      daze_write_u16(frame, RETURN_OFFSET);
+      daze_write_u16(frame + 2, DAZE_SEL_EXCEPTION_RETURN);
+    }
     memcpy((uint8_t *)m->guest + linear, frame, 16);
     daze_dpmi_descriptor_encode((uint8_t *)m->guest + s.gdt.base + DAZE_SEL_LOCKED_STACK,
                                 LOCKED_BASE, 0xfff, 0x92, 0);
@@ -208,8 +324,14 @@ int daze_kvm_legacy_exception_boundary(DazeKvmMachine *m, const DazeKvmProtected
     r.rsp = frame_sp;
     r.rip = handler_ip;
     r.rflags = (flags & ~0x200u) | 2;
-    state->deliveries[state->depth++] = (DazeKvmLegacyExceptionDelivery){
-      linear, code.base + (uint16_t)(ip + length), frame_sp, error};
+    state->deliveries[state->depth++] =
+      (DazeKvmLegacyExceptionDelivery){.frame_linear = linear,
+                                       .return_linear = code.base + (uint16_t)(ip + length),
+                                       .frame_sp = frame_sp,
+                                       .selector = error,
+                                       .return_ip = (uint16_t)(ip + length),
+                                       .return_cs = cs,
+                                       .native_return = native};
     if (getenv("DAZE_KVM_LEGACY_TRACE"))
       fprintf(stderr, "legacy-np: %04x:%04x error=%04x -> %04x:%04x depth=%zu\n", cs, ip, error,
               handler_cs, handler_ip, state->depth);

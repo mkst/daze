@@ -188,6 +188,15 @@ static void reporting(void) {
   has("metrics: kvm-debug-update-elisions=2");
   lacks("kvm-rm-procedure total");
   lacks("kvm-io-drain=");
+  lacks("kvm-exception-return");
+  run.kvm_exception_guest_returns = 7;
+  run.kvm_exception_host_returns = 2;
+  capture(1, NULL, &run, NULL);
+  has("kvm-exception-return guest=7 host=2");
+  run.kvm_exception_guest_returns = 0;
+  capture(1, NULL, &run, NULL);
+  has("kvm-exception-return guest=0 host=2");
+  run.kvm_exception_guest_returns = run.kvm_exception_host_returns = 0;
   run.kvm_io_drain_calls = 3;
   run.kvm_io_drain_nanoseconds = 2000000;
   run.kvm_io_drain_failures = 1;

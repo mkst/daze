@@ -6,10 +6,16 @@
 
 /* Accepted KVM fixtures require one active delivery at a time. Reject nested
  * faults explicitly until their locked-stack ownership is separately proved. */
-enum { DAZE_KVM_LEGACY_NP_MARKER = 0x1b, DAZE_KVM_LEGACY_MAX_DEPTH = 1 };
+enum {
+  DAZE_KVM_LEGACY_NP_MARKER = 0x1b,
+  DAZE_KVM_LEGACY_RETURN_MARKER = 0x1c,
+  DAZE_KVM_LEGACY_MAX_DEPTH = 1
+};
 typedef struct {
   uint32_t frame_linear, return_linear;
   uint16_t frame_sp, selector;
+  uint16_t return_ip, return_cs;
+  int native_return;
 } DazeKvmLegacyExceptionDelivery;
 typedef struct {
   DazeKvmLegacyExceptionDelivery deliveries[DAZE_KVM_LEGACY_MAX_DEPTH];
@@ -28,4 +34,9 @@ int daze_kvm_legacy_exception_boundary(DazeKvmMachine *machine,
                                        DazeKvmDpmiEntryResult *boundary);
 int daze_kvm_legacy_exception_rearm(DazeKvmMachine *machine,
                                     const DazeKvmLegacyExceptionState *state);
+int daze_kvm_legacy_exception_reconcile(DazeKvmMachine *machine, DazeKvmLegacyExceptionState *state,
+                                        const DazeKvmDpmiEntryResult *boundary);
+int daze_kvm_legacy_exception_guest_return(const DazeKvmLegacyExceptionState *state);
+void daze_kvm_legacy_exception_host_return(DazeKvmMachine *machine,
+                                           const DazeKvmLegacyExceptionState *state);
 #endif

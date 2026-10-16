@@ -1,6 +1,8 @@
 #include "guest_memory_layout.h"
 #include "legacy_exception.h"
 #include "machine_access.h"
+#include "selector.h"
+#include "exception_return_code.h"
 #include <stdlib.h>
 #include "descriptor.h"
 #include "kvm_bytes.h"
@@ -32,13 +34,16 @@ static int scenario(int mode, int fallback, unsigned sync) {
   m.sync_regs_mask &= sync;
   ((struct kvm_run *)m.run)->kvm_valid_regs = (uint64_t)m.sync_regs_mask;
   if (fallback) m.immediate_exit_supported = 0;
-  if (mode >= 10 && !m.immediate_exit_supported) {
+  if ((mode == 10 || mode == 11 || mode >= 19) && !m.immediate_exit_supported) {
     daze_kvm_machine_destroy(&m);
     return 0;
   }
   DazeRunMetrics metrics = {.enabled = 1};
   m.run_metrics = &metrics;
   uint8_t *g = m.guest;
+  daze_dpmi_descriptor_encode(g + GDT + DAZE_SEL_EXCEPTION_RETURN,
+                              k_dpmi_exception_locked_stack_base,
+                              k_memory_size - k_dpmi_exception_locked_stack_base - 1, 0x9a, 4);
   daze_dpmi_descriptor_encode(g + GDT + 8, 0x108d0, 0xffff, 0x9a, 0);
   daze_dpmi_descriptor_encode(g + GDT + 0x60, GATE, 0xffff, 0x9a, 0x04);
   daze_dpmi_descriptor_encode(g + GDT + 0x30, LDT, 0xffff, 0x82, 0);
@@ -132,9 +137,9 @@ static int scenario(int mode, int fallback, unsigned sync) {
   if (mode == 10) run->immediate_exit = 1;
   if (mode == 11) run->kvm_dirty_regs = KVM_SYNC_X86_REGS;
   int handled = daze_kvm_legacy_exception_boundary(&m, &gate, &process, &state, &b);
-  if (mode == 1 || mode == 2 || mode >= 10) {
+  if (mode == 1 || mode == 2 || mode == 10 || mode == 11) {
     int pass = handled == -1 && state.depth == 0 && memcmp(before, g + 0xfd0ff0, 16) == 0;
-    if (mode >= 10)
+    if (mode == 10 || mode == 11)
       pass = pass && run->immediate_exit == (mode == 10) &&
              run->kvm_dirty_regs == (mode == 11 ? KVM_SYNC_X86_REGS : 0);
     daze_kvm_machine_destroy(&m);
@@ -147,6 +152,11 @@ static int scenario(int mode, int fallback, unsigned sync) {
   if (mode == 5 || mode == 6) frame[0] = mode == 5 ? 0x5b : 0x5d;
   if (mode == 8) frame[0] = 0x5e;
   if (mode == 9) frame[0] = 0x5d;
+  const int native = daze_kvm_legacy_exception_guest_return(&state);
+  if (native) {
+    daze_write_u16(frame, k_kvm_exception_return_linear - k_dpmi_exception_locked_stack_base);
+    daze_write_u16(frame + 2, DAZE_SEL_EXCEPTION_RETURN);
+  }
   if (handled != 1 || b.cs != 8 || b.rip != 0x2f53 || b.ss != 0x48 || b.sp != 0xff0 ||
       b.ax != 0x2c01 || b.bx != 0x8707 || b.si != 0x96 || b.di != 0x23 || b.ds != 0x124 ||
       b.es != 0x124 || memcmp(g + 0xfd0ff0, frame, 16) != 0)
@@ -154,17 +164,67 @@ static int scenario(int mode, int fallback, unsigned sync) {
   /* Handler changes AX; the bridge must preserve the handler's result. */
   const int demand_loaded = mode >= 4 && mode <= 6;
   if (demand_loaded) g[LDT + 0xd0 + 5] |= 0x80; /* Demand-loaded: retry the instruction. */
+  if (mode >= 19) {
+    if (daze_kvm_machine_drain_io(&m) != DAZE_KVM_MACHINE_OK ||
+        ioctl(m.vcpu, KVM_GET_REGS, &r) < 0 || ioctl(m.vcpu, KVM_GET_SREGS, &s) < 0)
+      return legacy_failure(&m, __LINE__);
+    if (mode == 19) {
+      memcpy(g + 0xfd0fe0, g + 0xfd0ff0, 4);
+      r.rsp = 0xfe0;
+    } else if (mode == 20) {
+      memcpy(g + 0x72ff0, g + 0xfd0ff0, 4);
+      s.ss = segment(0x124, 0x72000, 0xffff, 3);
+    } else {
+      size_t offset;
+      for (offset = 0; offset + 2 < sizeof(exception_return_code); ++offset)
+        if (exception_return_code[offset] == 0x2e && exception_return_code[offset + 1] == 0x0f &&
+            exception_return_code[offset + 2] == 0xb2)
+          break;
+      if (offset + 2 >= sizeof(exception_return_code)) return legacy_failure(&m, __LINE__);
+      g[k_kvm_exception_return_linear + offset] = 0x0f;
+      g[k_kvm_exception_return_linear + offset + 1] = 0x0b;
+    }
+    if (ioctl(m.vcpu, KVM_SET_SREGS, &s) < 0 || ioctl(m.vcpu, KVM_SET_REGS, &r) < 0 ||
+        daze_kvm_dpmi_entry_continue_once(&m, &b) != DAZE_KVM_DPMI_ENTRY_OK ||
+        b.observation.raw_exit_reason != KVM_EXIT_SHUTDOWN)
+      return legacy_failure(&m, __LINE__);
+    (void)daze_kvm_legacy_exception_reconcile(&m, &state, &b);
+    if (state.depth != 1 || metrics.kvm_exception_guest_returns ||
+        metrics.kvm_exception_host_returns)
+      return legacy_failure(&m, __LINE__);
+    daze_kvm_machine_destroy(&m);
+    return 0;
+  }
+  if (mode == 12) daze_write_u16(g + 0xfd0ff0 + 12, 3);
+  if (mode == 13) daze_write_u16(g + 0xfd0ff0 + 10, 0x246);
+  if (mode == 15) daze_kvm_legacy_exception_host_return(&m, &state);
+  if (mode == 16) daze_dpmi_descriptor_encode(g + LDT + 0x120, 0x73000, 0xffff, 0x92, 0);
+  if (mode == 17) {
+    daze_dpmi_descriptor_encode(g + LDT + 0x128, 0x74000, 0xffff, 0x92, 0);
+    daze_write_u16(g + 0xfd0ff0 + 14, 0x12c);
+  }
+  if (mode == 18 && native)
+    daze_write_u32(g + k_kvm_exception_return_control + 20,
+                   k_dpmi_exception_locked_stack_base - 0x8000);
   if (ioctl(m.vcpu, KVM_GET_REGS, &r) < 0) return legacy_failure(&m, __LINE__);
   r.rax = 0x1234;
+  if (mode == 14) r.rflags |= 0x200000;
   if (ioctl(m.vcpu, KVM_SET_REGS, &r) < 0 || daze_kvm_dpmi_entry_continue_once(&m, &b) != 0)
     return legacy_failure(&m, __LINE__);
-  if (daze_kvm_legacy_exception_boundary(&m, &gate, &process, &state, &b) != 1 ||
-      state.depth != 0 || b.cs != (demand_loaded ? 0xd4 : 0xb4) || b.ss != 0x124 ||
-      b.sp != (mode == 6   ? 0xffc0
+  if (daze_kvm_legacy_exception_boundary(&m, &gate, &process, &state, &b) < 0 || state.depth != 0 ||
+      b.cs != (demand_loaded ? 0xd4 : 0xb4) || b.ss != (mode == 17 ? 0x12c : 0x124) ||
+      (mode == 16 && b.ss_base != 0x73000) || (b.rflags & 0x200000) ||
+      b.sp != (mode == 12  ? 3
+               : mode == 6 ? 0xffc0
                : mode == 5 ? 0xffba
                : mode == 4 ? 0xffb2
                            : 0xffb6) ||
-      b.ax != (demand_loaded ? 0x1255 : 0x1277) || (b.rflags & 0xffff) != 0x282)
+      b.ax != (demand_loaded ? 0x1255 : 0x1277) || b.es != 0x124 || b.es_base != 0x72000 ||
+      (b.rflags & 0xffff) != (mode == 13 ? 0x246 : 0x282))
+    return legacy_failure(&m, __LINE__);
+  const int host_return = !native || mode == 12 || (mode >= 15 && mode <= 18);
+  if (metrics.kvm_exception_guest_returns != (unsigned)!host_return ||
+      metrics.kvm_exception_host_returns != (unsigned)host_return)
     return legacy_failure(&m, __LINE__);
   daze_kvm_machine_destroy(&m);
   return 0;
@@ -250,7 +310,7 @@ static void drain_case(int debug, int sync) {
 int main(void) {
   for (unsigned sync = 0; sync < 4; ++sync)
     for (int fallback = 0; fallback < 2; ++fallback) {
-      for (int mode = 0; mode < 12; mode++) {
+      for (int mode = 0; mode < 22; mode++) {
         if (mode == 7) continue;
         int status = scenario(mode, fallback, sync);
         if (status) {
