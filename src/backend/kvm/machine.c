@@ -335,7 +335,7 @@ int daze_kvm_machine_snapshot_take(const DazeKvmMachine *machine,
     return DAZE_KVM_MACHINE_INVALID;
   DazeKvmMachineSnapshot candidate = {.guest_size = machine->guest_size,
                                       .write_batch_installed = machine->write_batch_installed};
-  candidate.guest_bytes = malloc(candidate.guest_size);
+  candidate.guest_bytes = calloc(1, candidate.guest_size);
   candidate.cpu_state = malloc(sizeof(DazeKvmMachineCpuState));
   if (candidate.guest_bytes == NULL || candidate.cpu_state == NULL) {
     daze_kvm_machine_snapshot_dispose(&candidate);
@@ -347,7 +347,15 @@ int daze_kvm_machine_snapshot_take(const DazeKvmMachine *machine,
     daze_kvm_machine_snapshot_dispose(&candidate);
     return DAZE_KVM_MACHINE_FAILED;
   }
-  memcpy(candidate.guest_bytes, machine->guest, candidate.guest_size);
+  static const uint8_t zeros[4096];
+  for (size_t offset = 0; offset < candidate.guest_size;) {
+    const size_t remaining = candidate.guest_size - offset;
+    const size_t length = remaining < sizeof(zeros) ? remaining : sizeof(zeros);
+    const uint8_t *const source = (const uint8_t *)machine->guest + offset;
+    if (memcmp(source, zeros, length) != 0)
+      memcpy((uint8_t *)candidate.guest_bytes + offset, source, length);
+    offset += length;
+  }
   candidate.valid = 1;
   daze_kvm_machine_snapshot_dispose(snapshot);
   *snapshot = candidate;
