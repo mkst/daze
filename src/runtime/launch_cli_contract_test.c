@@ -3,6 +3,7 @@
 
 #undef NDEBUG
 #include <assert.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -209,13 +210,13 @@ static void execution_cases(const char *backend) {
   const char *buffered[] = {runner, "--backend", mode, "--no-tmp", "BUFFER.EXE", NULL};
   char buffered_path[256];
   snprintf(buffered_path, sizeof(buffered_path), "%s/BUFFER.BIN", directory);
-  FILE *buffered_file = fopen(buffered_path, "wb");
-  assert(buffered_file && ftruncate(fileno(buffered_file), 0x100000) == 0 &&
-         fclose(buffered_file) == 0);
+  int buffered_fd = open(buffered_path, O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC, 0600);
+  assert(buffered_fd >= 0 && ftruncate(buffered_fd, 0x100000) == 0);
   run(buffered, 3, "", "cannot flush DOS output", NULL, -1);
   const char *buffered_failure[] = {runner, "--backend", mode, "--no-tmp", "BUFFERFAIL.EXE", NULL};
   run(buffered_failure, 37, "", "cannot flush DOS output", NULL, -1);
-  assert(stat(buffered_path, &info) == 0 && info.st_size == 0x100000 && unlink(buffered_path) == 0);
+  assert(fstat(buffered_fd, &info) == 0 && info.st_size == 0x100000);
+  assert(unlink(buffered_path) == 0 && close(buffered_fd) == 0);
   if (strcmp(expected, "kvm") == 0) {
     const char *halt[] = {runner,    "--backend", mode,       "--no-tmp",
                           "--debug", "--metrics", "HALT.EXE", NULL};
