@@ -135,7 +135,9 @@ int daze_kvm_legacy_exception_boundary(DazeKvmMachine *m, const DazeKvmProtected
                   b->ss == DAZE_SEL_LOCKED_STACK &&
                   b->sp == state->deliveries[state->depth - 1].frame_sp + 4;
   if (!capture && !returning) return 0;
-  if (ioctl(m->vcpu, KVM_GET_SREGS, &s) < 0 || ioctl(m->vcpu, KVM_GET_REGS, &r) < 0) return -1;
+  if (daze_kvm_machine_get_sregs(m, &s) != DAZE_KVM_MACHINE_OK ||
+      daze_kvm_machine_get_regs(m, &r) != DAZE_KVM_MACHINE_OK)
+    return -1;
   if (returning) {
     DazeKvmLegacyExceptionDelivery *d = &state->deliveries[state->depth - 1];
     const uint8_t *frame = (const uint8_t *)m->guest + d->frame_linear;
@@ -213,7 +215,8 @@ int daze_kvm_legacy_exception_boundary(DazeKvmMachine *m, const DazeKvmProtected
               handler_cs, handler_ip, state->depth);
   }
   daze_kvm_machine_debug_invalidate(m);
-  if (ioctl(m->vcpu, KVM_SET_SREGS, &s) < 0 || ioctl(m->vcpu, KVM_SET_REGS, &r) < 0 ||
+  if (daze_kvm_machine_set_sregs(m, &s) != DAZE_KVM_MACHINE_OK ||
+      daze_kvm_machine_set_regs(m, &r) != DAZE_KVM_MACHINE_OK ||
       !daze_kvm_legacy_exception_rearm(m, state))
     return -1;
   return daze_kvm_dpmi_entry_continue_once(m, b) == 0 ? 1 : -1;

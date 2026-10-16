@@ -25,10 +25,12 @@ static int legacy_failure(DazeKvmMachine *m, int line) {
           (unsigned long long)r.rflags);
   return 1;
 }
-static int scenario(int mode, int fallback) {
+static int scenario(int mode, int fallback, unsigned sync) {
   DazeKvmMachine m;
   int status = daze_kvm_machine_init(&m, k_memory_size);
   if (status) return status;
+  m.sync_regs_mask &= sync;
+  ((struct kvm_run *)m.run)->kvm_valid_regs = (uint64_t)m.sync_regs_mask;
   if (fallback) m.immediate_exit_supported = 0;
   if (mode >= 10 && !m.immediate_exit_supported) {
     daze_kvm_machine_destroy(&m);
@@ -246,16 +248,17 @@ static void drain_case(int debug, int sync) {
 }
 
 int main(void) {
-  for (int fallback = 0; fallback < 2; ++fallback) {
-    for (int mode = 0; mode < 12; mode++) {
-      if (mode == 7) continue;
-      int status = scenario(mode, fallback);
-      if (status) {
-        fprintf(stderr, "legacy scenario %d fallback=%d failed\n", mode, fallback);
-        return status;
+  for (unsigned sync = 0; sync < 4; ++sync)
+    for (int fallback = 0; fallback < 2; ++fallback) {
+      for (int mode = 0; mode < 12; mode++) {
+        if (mode == 7) continue;
+        int status = scenario(mode, fallback, sync);
+        if (status) {
+          fprintf(stderr, "legacy scenario %d fallback=%d sync=%u failed\n", mode, fallback, sync);
+          return status;
+        }
       }
     }
-  }
   for (int debug = 0; debug < 2; ++debug)
     for (int sync = 0; sync < 2; ++sync)
       drain_case(debug, sync);
