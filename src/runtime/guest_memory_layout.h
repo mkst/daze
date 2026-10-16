@@ -69,6 +69,9 @@ enum {
   k_kvm_exception_return_linear = k_dpmi_ldt_address - 0x1200,
   k_kvm_exception_return_size = 0x400,
   k_kvm_exception_return_control = k_kvm_exception_return_linear + 0x300,
+  k_kvm_exception_delivery_linear = k_dpmi_ldt_address - 0x3000,
+  k_kvm_exception_delivery_control = k_kvm_exception_delivery_linear + 0x800,
+  k_kvm_exception_delivery_size = 0xa00,
   k_dpmi_linear_arena_limit = k_dpmi_exception_locked_stack_base,
   k_dos_psp_size = 256,
   k_dos_environment_max_size = 512,
@@ -123,6 +126,7 @@ typedef enum {
   DAZE_GUEST_OWNER_DPMI_LDT,
   DAZE_GUEST_OWNER_DPMI_LOCKED_STACK,
   DAZE_GUEST_OWNER_KVM_EXCEPTION_RETURN,
+  DAZE_GUEST_OWNER_KVM_EXCEPTION_DELIVERY,
   DAZE_GUEST_OWNER_DPMI_CLIENT_ARENA,
   DAZE_GUEST_OWNER_CONVENTIONAL_ALLOCATOR,
   DAZE_GUEST_OWNER_KVM_RUNNER_GATE_ARENA,
@@ -141,9 +145,9 @@ typedef struct {
   DazeGuestOwner owner;
 } DazeGuestRange;
 
-enum { DAZE_GUEST_LAYOUT_MAX_RANGES = 21 };
+enum { DAZE_GUEST_LAYOUT_MAX_RANGES = 22 };
 
-enum { DAZE_GUEST_LAYOUT_STABLE_COUNT = 14 };
+enum { DAZE_GUEST_LAYOUT_STABLE_COUNT = 15 };
 
 typedef struct {
   DazeGuestRange ranges[DAZE_GUEST_LAYOUT_MAX_RANGES];

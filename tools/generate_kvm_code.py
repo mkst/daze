@@ -17,6 +17,13 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 
 PROFILES = {
+  "exception_delivery": {
+    "source": "src/backend/kvm/exception_delivery.S",
+    "entry": "exception_delivery",
+    "sections": [{"name": "exception_delivery_code", "section": ".text",
+                  "base": 0xfdd000, "limit": 0xfdd800, "start": 0xfdd000,
+                  "disasm": "intel"}],
+  },
   "exception_return": {
     "source": "src/backend/kvm/exception_return.S",
     "entry": "exception_return",

@@ -15,7 +15,7 @@ typedef struct {
   uint32_t frame_linear, return_linear;
   uint16_t frame_sp, selector;
   uint16_t return_ip, return_cs;
-  int native_return;
+  int native_return, guest_delivery;
 } DazeKvmLegacyExceptionDelivery;
 typedef struct {
   DazeKvmLegacyExceptionDelivery deliveries[DAZE_KVM_LEGACY_MAX_DEPTH];

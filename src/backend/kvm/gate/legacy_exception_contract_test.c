@@ -3,6 +3,7 @@
 #include "machine_access.h"
 #include "selector.h"
 #include "exception_return_code.h"
+#include "exception_delivery_code.h"
 #include <stdlib.h>
 #include "descriptor.h"
 #include "kvm_bytes.h"
@@ -27,7 +28,7 @@ static int legacy_failure(DazeKvmMachine *m, int line) {
           (unsigned long long)r.rflags);
   return 1;
 }
-static int scenario(int mode, int fallback, unsigned sync) {
+static int scenario(int mode, int fallback, unsigned sync, unsigned variant) {
   DazeKvmMachine m;
   int status = daze_kvm_machine_init(&m, k_memory_size);
   if (status) return status;
@@ -41,6 +42,8 @@ static int scenario(int mode, int fallback, unsigned sync) {
   DazeRunMetrics metrics = {.enabled = 1};
   m.run_metrics = &metrics;
   uint8_t *g = m.guest;
+  daze_dpmi_descriptor_encode(g + GDT + DAZE_SEL_GATE_CODE, 0, 0xfffff, 0x9a, 0x0c);
+  daze_dpmi_descriptor_encode(g + GDT + DAZE_SEL_GATE_DATA, 0, 0xfffff, 0x92, 0x0c);
   daze_dpmi_descriptor_encode(g + GDT + DAZE_SEL_EXCEPTION_RETURN,
                               k_dpmi_exception_locked_stack_base,
                               k_memory_size - k_dpmi_exception_locked_stack_base - 1, 0x9a, 4);
@@ -145,21 +148,26 @@ static int scenario(int mode, int fallback, unsigned sync) {
     daze_kvm_machine_destroy(&m);
     return pass ? 0 : 1;
   }
+  unsigned delivery_pass = 0;
+second_delivery:;
   uint8_t frame[] = {0x5f, 1, 0xb4, 0, 0xd4, 0, 0x5a, 1, 0xb4, 0, 0x82, 2, 0xb6, 0xff, 0x24, 1};
-  if (metrics.kvm_io_drain_calls != (unsigned)m.immediate_exit_supported ||
+  if (metrics.kvm_io_drain_calls !=
+        (delivery_pass == 1 ? 0 : (unsigned)m.immediate_exit_supported) ||
       metrics.kvm_io_drain_failures)
     return legacy_failure(&m, __LINE__);
   if (mode == 5 || mode == 6) frame[0] = mode == 5 ? 0x5b : 0x5d;
   if (mode == 8) frame[0] = 0x5e;
   if (mode == 9) frame[0] = 0x5d;
+  if (variant == 4 && delivery_pass) daze_write_u16(frame + 14, 0x12c);
+  if (variant == 6 && delivery_pass) daze_write_u16(frame + 12, 0x30);
   const int native = daze_kvm_legacy_exception_guest_return(&state);
   if (native) {
     daze_write_u16(frame, k_kvm_exception_return_linear - k_dpmi_exception_locked_stack_base);
     daze_write_u16(frame + 2, DAZE_SEL_EXCEPTION_RETURN);
   }
   if (handled != 1 || b.cs != 8 || b.rip != 0x2f53 || b.ss != 0x48 || b.sp != 0xff0 ||
-      b.ax != 0x2c01 || b.bx != 0x8707 || b.si != 0x96 || b.di != 0x23 || b.ds != 0x124 ||
-      b.es != 0x124 || memcmp(g + 0xfd0ff0, frame, 16) != 0)
+      (b.rflags & 0xffff) != 0x82 || b.ax != 0x2c01 || b.bx != 0x8707 || b.si != 0x96 ||
+      b.di != 0x23 || b.ds != 0x124 || b.es != 0x124 || memcmp(g + 0xfd0ff0, frame, 16) != 0)
     return legacy_failure(&m, __LINE__);
   /* Handler changes AX; the bridge must preserve the handler's result. */
   const int demand_loaded = mode >= 4 && mode <= 6;
@@ -212,7 +220,8 @@ static int scenario(int mode, int fallback, unsigned sync) {
   if (ioctl(m.vcpu, KVM_SET_REGS, &r) < 0 || daze_kvm_dpmi_entry_continue_once(&m, &b) != 0)
     return legacy_failure(&m, __LINE__);
   if (daze_kvm_legacy_exception_boundary(&m, &gate, &process, &state, &b) < 0 || state.depth != 0 ||
-      b.cs != (demand_loaded ? 0xd4 : 0xb4) || b.ss != (mode == 17 ? 0x12c : 0x124) ||
+      b.cs != (demand_loaded ? 0xd4 : 0xb4) ||
+      b.ss != ((mode == 17 || (variant == 4 && delivery_pass)) ? 0x12c : 0x124) ||
       (mode == 16 && b.ss_base != 0x73000) || (b.rflags & 0x200000) ||
       b.sp != (mode == 12  ? 3
                : mode == 6 ? 0xffc0
@@ -226,6 +235,82 @@ static int scenario(int mode, int fallback, unsigned sync) {
   if (metrics.kvm_exception_guest_returns != (unsigned)!host_return ||
       metrics.kvm_exception_host_returns != (unsigned)host_return)
     return legacy_failure(&m, __LINE__);
+  if (!delivery_pass && native) {
+    if (daze_kvm_machine_drain_io(&m) != DAZE_KVM_MACHINE_OK ||
+        ioctl(m.vcpu, KVM_GET_SREGS, &s) < 0)
+      return legacy_failure(&m, __LINE__);
+    uint8_t *data = g + k_kvm_exception_delivery_control;
+    g[LDT + 0xd0 + 5] &= (uint8_t)~0x80;
+    daze_dpmi_descriptor_encode(g + LDT + 0x120, 0x72000, 0xffff, 0x92, 0);
+    if (mode == 5 || mode == 6) {
+      daze_write_u16(g + 0x81fb6, 0);
+      daze_write_u16(g + 0x81fb8, 0xd4);
+    }
+    s.cs = segment(0xb4, 0x61000, 0x5540, 11);
+    s.ss = segment(0x124, 0x72000, 0xffff, 3);
+    if (variant == 4) {
+      daze_dpmi_descriptor_encode(g + LDT + 0x128, 0x72000, 0xffff, 0x92, 0);
+      daze_dpmi_descriptor_encode(g + LDT + 0x120, 0x73000, 0xffff, 0x92, 0);
+      s.ss.selector = 0x12c;
+      daze_write_u16(data + 26, 0x12c);
+      memcpy(data + 56, g + LDT + 0x128, 8);
+    }
+    if (variant == 10) s.ss.base = 0x73000;
+    r = (struct kvm_regs){.rip = 0x15a,
+                          .rsp = variant == 6   ? 0x30
+                                 : variant == 7 ? 0x1ffb6
+                                                : 0xffb6,
+                          .rflags = 0x282,
+                          .rax = 0x2c01,
+                          .rbx = 0x8707,
+                          .rsi = 0x96,
+                          .rdi = 0x23,
+                          .rbp = 0xffc8};
+    if (daze_kvm_machine_set_sregs(&m, &s) != DAZE_KVM_MACHINE_OK ||
+        daze_kvm_machine_set_regs(&m, &r) != DAZE_KVM_MACHINE_OK)
+      return legacy_failure(&m, __LINE__);
+    if (variant == 1) daze_write_u32(data, 0);
+    if (variant == 2) g[GDT + 8 + 6] ^= 0x10;
+    if (variant == 3 || variant == 11) {
+      size_t offset = 0;
+      if (variant == 11) {
+        for (; offset + 11 < sizeof(exception_delivery_code); ++offset)
+          if (exception_delivery_code[offset] == 0x36 &&
+              exception_delivery_code[offset + 1] == 0xc7 &&
+              exception_delivery_code[offset + 2] == 0x05 &&
+              daze_read_u32(exception_delivery_code + offset + 3) ==
+                k_kvm_exception_delivery_control + 32)
+            break;
+        if (offset + 11 >= sizeof(exception_delivery_code)) return legacy_failure(&m, __LINE__);
+        offset += 11;
+      }
+      g[k_kvm_exception_delivery_linear + offset] = 0x0f;
+      g[k_kvm_exception_delivery_linear + offset + 1] = 0x0b;
+    }
+    if (variant == 5) daze_dpmi_descriptor_encode(g + LDT + 0x120, 0x73000, 0xffff, 0x92, 0);
+    if (variant == 8) g[GDT + DAZE_SEL_GATE_DATA + 2] ^= 1;
+    if (variant == 9) g[GDT + s.ldt.selector + 2] ^= 1;
+    if (variant == 12) g[GDT + DAZE_SEL_EXCEPTION_RETURN + 2] ^= 1;
+    if (variant == 13) g[GDT + DAZE_SEL_LOCKED_STACK + 2] ^= 1;
+    metrics = (DazeRunMetrics){.enabled = 1};
+    if (daze_kvm_dpmi_entry_continue_once(&m, &b) != 0) return legacy_failure(&m, __LINE__);
+    if (variant == 3 || variant == 11) {
+      if (b.observation.raw_exit_reason != KVM_EXIT_SHUTDOWN ||
+          daze_kvm_legacy_exception_reconcile(&m, &state, &b))
+        return legacy_failure(&m, __LINE__);
+      daze_kvm_machine_destroy(&m);
+      return 0;
+    }
+    int host_delivery = variant && variant != 4;
+    handled = daze_kvm_legacy_exception_boundary(&m, &gate, &process, &state, &b);
+    if (handled != host_delivery ||
+        metrics.kvm_exception_guest_deliveries != (unsigned)!host_delivery ||
+        metrics.kvm_exception_host_deliveries != (unsigned)host_delivery)
+      return legacy_failure(&m, __LINE__);
+    handled = 1;
+    delivery_pass = host_delivery ? 2 : 1;
+    goto second_delivery;
+  }
   daze_kvm_machine_destroy(&m);
   return 0;
 }
@@ -312,13 +397,23 @@ int main(void) {
     for (int fallback = 0; fallback < 2; ++fallback) {
       for (int mode = 0; mode < 22; mode++) {
         if (mode == 7) continue;
-        int status = scenario(mode, fallback, sync);
+        int status = scenario(mode, fallback, sync, 0);
         if (status) {
           fprintf(stderr, "legacy scenario %d fallback=%d sync=%u failed\n", mode, fallback, sync);
           return status;
         }
       }
     }
+  for (unsigned variant = 1; variant <= 13; ++variant)
+    for (unsigned sync = 0; sync < 4; ++sync)
+      if (scenario(variant == 4   ? 9
+                   : variant == 5 ? 16
+                   : variant == 6 ? 12
+                                  : 0,
+                   0, sync, variant)) {
+        fprintf(stderr, "legacy delivery variant=%u sync=%u failed\n", variant, sync);
+        return 1;
+      }
   for (int debug = 0; debug < 2; ++debug)
     for (int sync = 0; sync < 2; ++sync)
       drain_case(debug, sync);

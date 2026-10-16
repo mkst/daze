@@ -61,6 +61,8 @@ int main(void) {
         "callback return bridge is persistent", &pass);
   check(daze_guest_owner_persistent(DAZE_GUEST_OWNER_KVM_EXCEPTION_RETURN),
         "exception return helper is persistent", &pass);
+  check(daze_guest_owner_persistent(DAZE_GUEST_OWNER_KVM_EXCEPTION_DELIVERY),
+        "exception delivery helper is persistent", &pass);
   check(daze_guest_layout_validate_ranges(stable.ranges, stable.count, (uint32_t)k_memory_size,
                                           &failure),
         "stable set is internally consistent", &pass);

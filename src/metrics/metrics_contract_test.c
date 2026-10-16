@@ -189,6 +189,15 @@ static void reporting(void) {
   lacks("kvm-rm-procedure total");
   lacks("kvm-io-drain=");
   lacks("kvm-exception-return");
+  lacks("kvm-exception-delivery");
+  run.kvm_exception_guest_deliveries = 7;
+  run.kvm_exception_host_deliveries = 2;
+  capture(1, NULL, &run, NULL);
+  has("kvm-exception-delivery guest=7 host=2");
+  run.kvm_exception_guest_deliveries = 0;
+  capture(1, NULL, &run, NULL);
+  has("kvm-exception-delivery guest=0 host=2");
+  run.kvm_exception_guest_deliveries = run.kvm_exception_host_deliveries = 0;
   run.kvm_exception_guest_returns = 7;
   run.kvm_exception_host_returns = 2;
   capture(1, NULL, &run, NULL);

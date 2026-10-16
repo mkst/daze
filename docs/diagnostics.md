@@ -51,6 +51,12 @@ host restorations. Tiny or changed stack frames and returns involving raw mode
 switches or real-mode callbacks retain host restoration. Faults inside the
 helper remain failures; they are not treated as a completed client return.
 
+After a validated host delivery, supported #NP captures can also build the frame
+and enter the registered application handler in the guest. `kvm-exception-delivery
+guest=N host=N` reports these deliveries separately from returns. Changed tables,
+descriptors or unsupported stacks/instructions retain host capture. The existing
+`DAZE_KVM_LEGACY_TRACE` diagnostic forces host capture for per-delivery records.
+
 ## KVM guest descriptor services
 
 The normal protected gate handles valid DPMI 0006h/0007h/0008h/0009h/000Ch descriptor
