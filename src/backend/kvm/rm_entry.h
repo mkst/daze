@@ -33,6 +33,8 @@ enum {
   DAZE_KVM_RM_ENTRY_SET_DESCRIPTOR_VALID_OFFSET = 0x69c,
   DAZE_KVM_RM_ENTRY_SET_DESCRIPTOR_SIGNATURE = 0x000c000c,
   DAZE_KVM_RM_ENTRY_SET_DESCRIPTOR_LINEAR = 0x5ea0,
+  DAZE_KVM_RM_ENTRY_GET_BASE_LINEAR = 0x2800,
+  DAZE_KVM_RM_ENTRY_GET_BASE_COUNT_OFFSET = 0x7fc,
   DAZE_KVM_RM_ENTRY_PARKED = 0x2a00,
 };
 
@@ -45,6 +47,8 @@ _Static_assert(DAZE_KVM_RM_ENTRY_VECTOR_ENABLED_OFFSET + 4 <= DAZE_KVM_RM_ENTRY_
 _Static_assert(DAZE_KVM_RM_ENTRY_SET_DESCRIPTOR_VALID_OFFSET + 4 <=
                  DAZE_KVM_RM_ENTRY_SET_DESCRIPTOR_LINEAR - DAZE_KVM_RM_ENTRY_CONTROL,
                "descriptor metadata stays below helper code");
+_Static_assert(DAZE_KVM_RM_ENTRY_GET_BASE_COUNT_OFFSET + 4 <= DAZE_KVM_RM_ENTRY_CONTROL_SIZE,
+               "get base counter stays inside reserved control storage");
 
 static inline void daze_kvm_rm_entry_publish_descriptors(const DazeKvmDpmiMediator *mediator) {
   if (mediator == NULL || mediator->guest == NULL ||
@@ -134,6 +138,10 @@ static inline void daze_kvm_rm_entry_sync_metrics(DazeKvmMachine *machine) {
                              DAZE_KVM_RM_ENTRY_SET_DESCRIPTOR_COUNT_OFFSET;
       machine->run_metrics->kvm_guest_descriptor_calls[3] += daze_read_u32(set_counter);
       daze_write_u32(set_counter, 0);
+      uint8_t *get_counter = (uint8_t *)machine->guest + DAZE_KVM_RM_ENTRY_CONTROL +
+                             DAZE_KVM_RM_ENTRY_GET_BASE_COUNT_OFFSET;
+      machine->run_metrics->kvm_guest_descriptor_calls[4] += daze_read_u32(get_counter);
+      daze_write_u32(get_counter, 0);
       daze_write_u32(
         (uint8_t *)machine->guest + DAZE_KVM_RM_ENTRY_CONTROL + DAZE_KVM_RM_ENTRY_COUNT_OFFSET, 0);
       for (unsigned i = 0; i < 3; ++i) {

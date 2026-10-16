@@ -16,7 +16,10 @@
 .equ SET_GDT_LAST, CTRL+0x694
 .equ SET_RAM_LAST, CTRL+0x698
 .equ SET_VALID, CTRL+0x69c
+.equ GET_BASE_COUNT, CTRL+0x7fc
 native_entry:
+  cmp word ptr fs:[REC], 6
+  je get_base_entry
   cmp word ptr fs:[REC], 0xc
   je set_descriptor_entry
   cmp word ptr fs:[REC], 0x204
@@ -469,6 +472,59 @@ set_descriptor_valid:
   mov fs:[edx+4], ebx
   inc dword ptr fs:[SET_COUNT]
   jmp descriptor_reply
+
+.section .get_base,"ax"
+.code32
+get_base_entry:
+  cmp dword ptr fs:[SET_VALID], 0x000c000c
+  jne descriptor_fallback
+  mov eax, cr0
+  test eax, 0x80000000
+  jnz descriptor_fallback
+  movzx eax, word ptr fs:[REC+4]
+  mov esi, eax
+  and esi, 0xfff8
+  jz descriptor_fallback
+  test al, 4
+  jz get_base_global
+  cmp esi, fs:[CTRL+0x70]
+  ja descriptor_fallback
+  add esi, fs:[CTRL+0x6c]
+  jmp get_base_decode
+get_base_global:
+  cmp esi, fs:[SET_GDT_LAST]
+  ja descriptor_fallback
+  add esi, fs:[SET_GDT]
+get_base_decode:
+  mov eax, fs:[esi+4]
+  movzx edx, word ptr fs:[esi+2]
+  mov ecx, eax
+  and ecx, 0xff000000
+  or edx, ecx
+  movzx eax, al
+  shl eax, 16
+  or edx, eax
+  /* Match the hosted reply's whole-register ECX/EDX outputs. */
+  mov ecx, edx
+  shr ecx, 16
+  mov fs:[MAIL+8], ecx
+  mov fs:[MAIL+24], edx
+  mov dword ptr fs:[CTRL], 0
+  mov eax, fs:[REC]
+  mov fs:[MAIL], eax
+  mov eax, fs:[REC+4]
+  mov fs:[MAIL+4], eax
+  mov eax, fs:[REC+24]
+  mov fs:[MAIL+12], eax
+  mov eax, fs:[REC+16]
+  mov fs:[MAIL+16], eax
+  mov eax, fs:[REC+40]
+  shl eax, 16
+  mov ax, fs:[REC+20]
+  mov fs:[MAIL+20], eax
+  mov dword ptr fs:[MAIL+28], 0
+  inc dword ptr fs:[GET_BASE_COUNT]
+  jmp dword ptr fs:[CTRL+0x30]
 
 .section .low,"ax"
 .code16

@@ -41,12 +41,13 @@ use host process cancellation or an external timeout (for example,
 
 ## KVM guest descriptor services
 
-The normal protected gate handles valid DPMI 0007h/0008h/0009h/000Ch descriptor
-updates in the guest. Rejected requests retain the host path.
-`--metrics` reports completed guest updates as `kvm-guest-descriptors`;
+The normal protected gate handles valid DPMI 0006h/0007h/0008h/0009h/000Ch descriptor
+queries and updates in the guest. Rejected requests retain the host path.
+`--metrics` reports completed guest services as `kvm-guest-descriptors`;
 `kvm-dpmi-functions` counts hosted requests. Set `DAZE_KVM_GUEST_DESCRIPTORS=0`
-to route all four services through the host for comparison. Set Descriptor
-requires published GDT/LDT bounds; missing metadata and paging retain the host path.
+to route all five services through the host for comparison. Get Segment Base and
+Set Descriptor require published GDT/LDT bounds; missing metadata and paging
+retain the host path.
 
 ## KVM guest vector queries
 

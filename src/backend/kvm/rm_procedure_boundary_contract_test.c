@@ -542,9 +542,17 @@ static void native_binding_contract(void) {
   daze_kvm_rm_entry_sync_metrics(&machine);
   daze_kvm_rm_entry_sync_metrics(&machine);
   assert(metrics.kvm_guest_descriptor_calls[3] == 7);
+  daze_write_u32(control + DAZE_KVM_RM_ENTRY_GET_BASE_COUNT_OFFSET, 11);
+  daze_kvm_rm_entry_sync_metrics(&machine);
+  daze_kvm_rm_entry_sync_metrics(&machine);
+  assert(metrics.kvm_guest_descriptor_calls[4] == 11);
+  assert(daze_read_u32(control + DAZE_KVM_RM_ENTRY_GET_BASE_COUNT_OFFSET) == 0);
+  daze_write_u32(control + DAZE_KVM_RM_ENTRY_GET_BASE_COUNT_OFFSET, 5);
   daze_write_u32(control + DAZE_KVM_RM_ENTRY_SET_DESCRIPTOR_COUNT_OFFSET, 3);
   assert(daze_kvm_rm_entry_install(&machine, 1, k_dpmi_ldt_address, 0x10000));
   assert(metrics.kvm_guest_descriptor_calls[3] == 10);
+  assert(metrics.kvm_guest_descriptor_calls[4] == 16);
+  assert(daze_read_u32(control + DAZE_KVM_RM_ENTRY_GET_BASE_COUNT_OFFSET) == 0);
   assert(daze_read_u32(control + DAZE_KVM_RM_ENTRY_SET_DESCRIPTOR_VALID_OFFSET) == 0);
   assert(daze_read_u32(control + DAZE_KVM_RM_ENTRY_SET_DESCRIPTOR_COUNT_OFFSET) == 0);
   DazeKvmDpmiMediator vectors = {.guest = guest,
