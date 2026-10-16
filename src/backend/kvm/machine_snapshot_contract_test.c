@@ -41,7 +41,7 @@ static int restore_variants(DazeKvmMachine *machine, const DazeKvmMachineSnapsho
 }
 
 static int capture_variants(DazeKvmMachine *machine) {
-  const size_t sizes[] = {17, 4095, 4096, 4113, 0x10000};
+  const size_t sizes[] = {17, 4095, 4096, 4113, 0x10000, 0x22000};
   DazeKvmMachineSnapshot snapshot = {0};
   for (size_t index = 0; index < sizeof(sizes) / sizeof(sizes[0]); ++index) {
     for (unsigned variant = 0; variant < 5; ++variant) {
@@ -51,7 +51,7 @@ static int capture_variants(DazeKvmMachine *machine) {
       view.guest_size = sizes[index];
       if (variant == 3) {
         for (size_t offset = 0; offset < view.guest_size; offset += 4096)
-          guest[offset] = 0x37;
+          if ((offset / 4096) % 8 == 0 || (offset / 4096) % 8 == 7) guest[offset] = 0x37;
         guest[view.guest_size - 1] = 0xe1;
       }
       int status = daze_kvm_machine_snapshot_take(&view, &snapshot);
@@ -81,7 +81,7 @@ static int capture_variants(DazeKvmMachine *machine) {
 
 int main(void) {
   DazeKvmMachine machine;
-  const int init = daze_kvm_machine_init(&machine, 0x10000);
+  const int init = daze_kvm_machine_init(&machine, 0x22000);
   if (init == DAZE_KVM_MACHINE_UNAVAILABLE) return 77;
   if (init != DAZE_KVM_MACHINE_OK) return 1;
   uint8_t *guest = machine.guest;

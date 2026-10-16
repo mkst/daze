@@ -22,6 +22,7 @@ typedef struct {
 } DazeKvmMachine;
 
 /* EXEC checkpoint owns a complete RAM copy and KVM general/special registers.
+ * Saved bytes and CPU metadata must not be modified.
  * Construct with snapshot_take and release with snapshot_dispose; not a portable format. */
 typedef struct {
   void *guest_bytes;

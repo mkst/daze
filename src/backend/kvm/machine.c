@@ -17,7 +17,9 @@
 typedef struct {
   struct kvm_regs regs;
   struct kvm_sregs sregs;
+  uint8_t nonzero_chunks[];
 } DazeKvmMachineCpuState;
+static const uint8_t snapshot_zero_chunk[4096];
 static struct kvm_segment seg(uint16_t s) {
   struct kvm_segment x;
   memset(&x, 0, sizeof(x));
@@ -335,8 +337,11 @@ int daze_kvm_machine_snapshot_take(const DazeKvmMachine *machine,
     return DAZE_KVM_MACHINE_INVALID;
   DazeKvmMachineSnapshot candidate = {.guest_size = machine->guest_size,
                                       .write_batch_installed = machine->write_batch_installed};
+  const size_t chunks = (candidate.guest_size - 1) / sizeof(snapshot_zero_chunk) + 1;
+  const size_t bitmap_bytes = (chunks - 1) / 8 + 1;
+  if (bitmap_bytes > SIZE_MAX - sizeof(DazeKvmMachineCpuState)) return DAZE_KVM_MACHINE_FAILED;
   candidate.guest_bytes = calloc(1, candidate.guest_size);
-  candidate.cpu_state = malloc(sizeof(DazeKvmMachineCpuState));
+  candidate.cpu_state = calloc(1, sizeof(DazeKvmMachineCpuState) + bitmap_bytes);
   if (candidate.guest_bytes == NULL || candidate.cpu_state == NULL) {
     daze_kvm_machine_snapshot_dispose(&candidate);
     return DAZE_KVM_MACHINE_FAILED;
@@ -347,13 +352,16 @@ int daze_kvm_machine_snapshot_take(const DazeKvmMachine *machine,
     daze_kvm_machine_snapshot_dispose(&candidate);
     return DAZE_KVM_MACHINE_FAILED;
   }
-  static const uint8_t zeros[4096];
   for (size_t offset = 0; offset < candidate.guest_size;) {
     const size_t remaining = candidate.guest_size - offset;
-    const size_t length = remaining < sizeof(zeros) ? remaining : sizeof(zeros);
+    const size_t length =
+      remaining < sizeof(snapshot_zero_chunk) ? remaining : sizeof(snapshot_zero_chunk);
     const uint8_t *const source = (const uint8_t *)machine->guest + offset;
-    if (memcmp(source, zeros, length) != 0)
+    if (memcmp(source, snapshot_zero_chunk, length) != 0) {
       memcpy((uint8_t *)candidate.guest_bytes + offset, source, length);
+      const size_t chunk = offset / sizeof(snapshot_zero_chunk);
+      state->nonzero_chunks[chunk / 8] |= (uint8_t)(1u << (chunk % 8));
+    }
     offset += length;
   }
   candidate.valid = 1;
@@ -377,7 +385,10 @@ int daze_kvm_machine_snapshot_restore(DazeKvmMachine *machine,
     const size_t remaining = machine->guest_size - offset;
     const size_t length = remaining < 4096 ? remaining : 4096;
     uint8_t *const destination = (uint8_t *)machine->guest + offset;
-    const uint8_t *const source = (const uint8_t *)snapshot->guest_bytes + offset;
+    const size_t chunk = offset / sizeof(snapshot_zero_chunk);
+    const uint8_t *const source = (state->nonzero_chunks[chunk / 8] & (1u << (chunk % 8)))
+                                    ? (const uint8_t *)snapshot->guest_bytes + offset
+                                    : snapshot_zero_chunk;
     if (memcmp(destination, source, length) != 0) memcpy(destination, source, length);
     offset += length;
   }
