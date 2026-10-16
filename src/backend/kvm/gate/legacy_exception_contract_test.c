@@ -295,8 +295,14 @@ second_delivery:;
     metrics = (DazeRunMetrics){.enabled = 1};
     if (daze_kvm_dpmi_entry_continue_once(&m, &b) != 0) return legacy_failure(&m, __LINE__);
     if (variant == 3 || variant == 11) {
+      const DazeKvmDpmiEntryResult before = b;
+      int reconciled = daze_kvm_legacy_exception_reconcile(&m, &state, &b);
+      /* SVM resets registers on shutdown; an unowned entry has no surviving helper identity. */
       if (b.observation.raw_exit_reason != KVM_EXIT_SHUTDOWN ||
-          daze_kvm_legacy_exception_reconcile(&m, &state, &b))
+          b.observation.kind != DAZE_KVM_DPMI_ENTRY_EXIT_OTHER || (variant == 11 && reconciled) ||
+          (variant == 3 && state.depth) || daze_read_u32(data + 32) != (unsigned)(variant == 11) ||
+          metrics.kvm_exception_guest_returns || metrics.kvm_exception_host_returns ||
+          memcmp(&b, &before, sizeof(b)) != 0)
         return legacy_failure(&m, __LINE__);
       daze_kvm_machine_destroy(&m);
       return 0;

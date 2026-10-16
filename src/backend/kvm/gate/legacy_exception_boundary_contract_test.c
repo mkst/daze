@@ -445,6 +445,24 @@ static void guest_delivery_inputs(void) {
   daze_write_u32(data + DELIVERY_ACTIVE, 0);
   state.depth = 0;
   CHECK(daze_kvm_legacy_exception_reconcile(&m, &state, &b));
+  const DazeKvmDpmiEntryResult before_shutdown = b;
+  b = (DazeKvmDpmiEntryResult){
+    .cs = 0xf000,
+    .rip = 0xfff0,
+    .rflags = 2,
+    .observation = {.kind = DAZE_KVM_DPMI_ENTRY_EXIT_OTHER, .raw_exit_reason = KVM_EXIT_SHUTDOWN}};
+  const DazeKvmDpmiEntryResult reset = b;
+  const DazeRunMetrics before_metrics = metrics;
+  CHECK(daze_kvm_legacy_exception_reconcile(&m, &state, &b) && !state.depth &&
+        memcmp(&b, &reset, sizeof(b)) == 0);
+  daze_write_u32(data + DELIVERY_ACTIVE, 1);
+  CHECK(!daze_kvm_legacy_exception_reconcile(&m, &state, &b) && state.depth == 1 &&
+        state.deliveries[0].guest_delivery && daze_read_u32(data + DELIVERY_ACTIVE) == 1 &&
+        memcmp(&b, &reset, sizeof(b)) == 0 &&
+        memcmp(&metrics, &before_metrics, sizeof(metrics)) == 0);
+  daze_write_u32(data + DELIVERY_ACTIVE, 0);
+  state.depth = 0;
+  b = before_shutdown;
   b.observation.kind = DAZE_KVM_DPMI_ENTRY_EXIT_PIO;
   b.observation.pio_value_present = 1;
   b.observation.pio_value = DAZE_KVM_LEGACY_NP_MARKER;
