@@ -323,7 +323,8 @@ static void transition_write_contract(void) {
 
 static void raw_continuation_rejections(void) {
   uint8_t guest[16] = {0};
-  DazeKvmMachine machine = {.guest = guest, .guest_size = sizeof(guest), .vcpu = -1};
+  uint8_t run;
+  DazeKvmMachine machine = {.guest = guest, .guest_size = sizeof(guest), .vcpu = 1, .run = &run};
   DazeKvmDpmiEntryResult boundary;
   for (unsigned depth = 0; depth < 2; ++depth) {
     assert(continue_raw_switch(NULL, 0, depth, &boundary) == DAZE_KVM_DPMI_ENTRY_INVALID);
@@ -332,10 +333,18 @@ static void raw_continuation_rejections(void) {
     assert(continue_raw_switch(&machine, UINT32_MAX, depth, &boundary) ==
            DAZE_KVM_DPMI_ENTRY_INVALID);
     assert(continue_raw_switch(&machine, 0, depth, NULL) == DAZE_KVM_DPMI_ENTRY_INVALID);
+    machine.vcpu = -1;
+    memset(&boundary, 0xff, sizeof(boundary));
     assert(continue_raw_switch(&machine, 0, depth, &boundary) == DAZE_KVM_DPMI_ENTRY_INVALID);
+    assert(boundary.cs == 0 && boundary.esp == 0 && boundary.observation.kind == 0);
+    machine.vcpu = 1;
+    machine.run = NULL;
+    assert(continue_raw_switch(&machine, 0, depth, &boundary) == DAZE_KVM_DPMI_ENTRY_INVALID);
+    machine.run = &run;
+    machine.guest = NULL;
+    assert(continue_raw_switch(&machine, 0, depth, &boundary) == DAZE_KVM_DPMI_ENTRY_INVALID);
+    machine.guest = guest;
   }
-  machine.guest = NULL;
-  assert(continue_raw_switch(&machine, 0, 0, &boundary) == DAZE_KVM_DPMI_ENTRY_INVALID);
 }
 
 #if defined(__linux__) && (defined(__x86_64__) || defined(__i386__))

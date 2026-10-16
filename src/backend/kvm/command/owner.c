@@ -958,8 +958,8 @@ static int resume_exec_parent(DazeKvmCommandOwnerHandoff *handoff,
 
 static int continue_raw_switch(DazeKvmMachine *machine, uint32_t linear, unsigned legacy_depth,
                                DazeKvmDpmiEntryResult *boundary) {
-  if (machine == NULL || machine->guest == NULL ||
-      !daze_kvm_range_fits(machine->guest_size, linear, 1)) {
+  if (machine == NULL || boundary == NULL || machine->vcpu < 0 || machine->run == NULL ||
+      machine->guest == NULL || !daze_kvm_range_fits(machine->guest_size, linear, 1)) {
     if (boundary != NULL) *boundary = (DazeKvmDpmiEntryResult){0};
     return DAZE_KVM_DPMI_ENTRY_INVALID;
   }
