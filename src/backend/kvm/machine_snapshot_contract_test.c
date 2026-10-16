@@ -1,6 +1,44 @@
 #include "machine.h"
 
+#include <stdio.h>
 #include <string.h>
+
+static int restore_variants(DazeKvmMachine *machine, const DazeKvmMachineSnapshot *snapshot) {
+  uint8_t *const guest = machine->guest;
+  for (unsigned variant = 0; variant < 5; ++variant) {
+    if (variant == 1) {
+      guest[4095] ^= 1;
+      guest[4096] ^= 2;
+      guest[machine->guest_size - 1] ^= 4;
+    } else if (variant == 2) {
+      memset(guest, 0xa5, machine->guest_size);
+    } else if (variant == 3) {
+      memset(guest, 0, machine->guest_size);
+    } else if (variant == 4) {
+      for (size_t offset = 0; offset < machine->guest_size; offset += 8192)
+        guest[offset] ^= 0xff;
+    }
+    const int status = daze_kvm_machine_snapshot_restore(machine, snapshot);
+    if (status != DAZE_KVM_MACHINE_OK ||
+        memcmp(guest, snapshot->guest_bytes, machine->guest_size) != 0) {
+      fprintf(stderr, "snapshot restore variant=%u status=%d\n", variant, status);
+      return 0;
+    }
+  }
+  DazeKvmMachine partial = *machine;
+  DazeKvmMachineSnapshot saved = *snapshot;
+  partial.guest_size = saved.guest_size = 4096 + 17;
+  guest[partial.guest_size - 1] ^= 0xff;
+  guest[partial.guest_size] = 0x6d;
+  const int status = daze_kvm_machine_snapshot_restore(&partial, &saved);
+  if (status != DAZE_KVM_MACHINE_OK || memcmp(guest, saved.guest_bytes, partial.guest_size) != 0 ||
+      guest[partial.guest_size] != 0x6d) {
+    fprintf(stderr, "snapshot partial restore status=%d\n", status);
+    return 0;
+  }
+  return daze_kvm_machine_snapshot_restore(machine, snapshot) == DAZE_KVM_MACHINE_OK &&
+         memcmp(guest, snapshot->guest_bytes, machine->guest_size) == 0;
+}
 
 int main(void) {
   DazeKvmMachine machine;
@@ -29,6 +67,7 @@ int main(void) {
       daze_kvm_machine_snapshot_restore(&machine, &snapshot) != DAZE_KVM_MACHINE_OK) {
     goto out;
   }
+  if (!restore_variants(&machine, &snapshot)) goto out;
   DazeKvmPortAccess access = {0};
   if (daze_kvm_machine_run_port_access(&machine, &access) == DAZE_KVM_MACHINE_OK &&
       access.direction == DAZE_KVM_PORT_OUT && access.port == 0xf4 && access.value == 0x11 &&

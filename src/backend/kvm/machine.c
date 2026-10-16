@@ -365,7 +365,14 @@ int daze_kvm_machine_snapshot_restore(DazeKvmMachine *machine,
       ioctl(machine->vcpu, KVM_SET_REGS, &state->regs) < 0)
     return DAZE_KVM_MACHINE_FAILED;
   daze_kvm_rm_entry_sync_metrics(machine);
-  memcpy(machine->guest, snapshot->guest_bytes, machine->guest_size);
+  for (size_t offset = 0; offset < machine->guest_size;) {
+    const size_t remaining = machine->guest_size - offset;
+    const size_t length = remaining < 4096 ? remaining : 4096;
+    uint8_t *const destination = (uint8_t *)machine->guest + offset;
+    const uint8_t *const source = (const uint8_t *)snapshot->guest_bytes + offset;
+    if (memcmp(destination, source, length) != 0) memcpy(destination, source, length);
+    offset += length;
+  }
   daze_kvm_rm_entry_invalidate(machine);
   machine->write_batch_installed = snapshot->write_batch_installed;
   daze_kvm_write_batch_revoke(machine);
