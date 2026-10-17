@@ -84,6 +84,13 @@ static int dos_component_equal(const char *left, const char *right) {
  * rather than making a guest path access depend on directory enumeration. */
 static int resolve_dos_component(int directory_fd, const char *requested, char *resolved,
                                  size_t resolved_size, int *host_errno) {
+  const size_t requested_length = strlen(requested);
+  struct stat information;
+  if (requested_length < resolved_size &&
+      fstatat(directory_fd, requested, &information, AT_SYMLINK_NOFOLLOW) == 0) {
+    memcpy(resolved, requested, requested_length + 1);
+    return 1;
+  }
   /* dup() shares the directory stream position with directory_fd; an earlier
    * case-folded lookup would then make a later one start at end-of-directory.
    * Re-open "." to obtain an independent stream while staying beneath the
