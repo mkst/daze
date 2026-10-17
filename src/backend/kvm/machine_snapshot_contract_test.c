@@ -8,7 +8,7 @@
 static int mapping_released(void *address) {
   unsigned char resident;
   errno = 0;
-  const int status = mincore(address, 1, &resident);
+  const int status = mincore(address, 1, (void *)&resident);
   if (status == -1 && errno == ENOMEM) return 1;
   fprintf(stderr, "snapshot mapping retained: address=%p mincore=%d errno=%d\n", address, status,
           errno);
