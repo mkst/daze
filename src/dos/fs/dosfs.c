@@ -886,7 +886,8 @@ DazeDosfsStatus daze_dosfs_handles_duplicate(DazeDosfsHandles *handles, uint16_t
   }
   int source_fd = -1;
   if (dos_handle == NULL) return DAZE_DOSFS_INVALID_PATH;
-  const DazeDosfsStatus source_status = daze_dosfs_handles_get(handles, source_handle, &source_fd);
+  const DazeDosfsStatus source_status =
+    daze_dosfs_handles_flush_and_get(handles, source_handle, &source_fd);
   if (source_status != DAZE_DOSFS_OK) {
     if (source_status == DAZE_DOSFS_HOST_ERROR && host_errno != NULL) *host_errno = errno;
     return source_status;
@@ -917,7 +918,8 @@ DazeDosfsStatus daze_dosfs_handles_force_duplicate(DazeDosfsHandles *handles,
   if (host_errno != NULL) *host_errno = 0;
   int source_fd = -1;
   if (handles == NULL || target_handle >= DAZE_DOSFS_MAX_HANDLES) return DAZE_DOSFS_INVALID_PATH;
-  const DazeDosfsStatus source_status = daze_dosfs_handles_get(handles, source_handle, &source_fd);
+  const DazeDosfsStatus source_status =
+    daze_dosfs_handles_flush_and_get(handles, source_handle, &source_fd);
   if (source_status != DAZE_DOSFS_OK) {
     if (source_status == DAZE_DOSFS_HOST_ERROR && host_errno != NULL) *host_errno = errno;
     return source_status;
@@ -954,8 +956,8 @@ DazeDosfsStatus daze_dosfs_handles_peek(const DazeDosfsHandles *handles, uint16_
   return DAZE_DOSFS_OK;
 }
 
-DazeDosfsStatus daze_dosfs_handles_get(const DazeDosfsHandles *handles, uint16_t dos_handle,
-                                       int *host_fd) {
+DazeDosfsStatus daze_dosfs_handles_flush_and_get(const DazeDosfsHandles *handles,
+                                                 uint16_t dos_handle, int *host_fd) {
   DazeDosfsStatus status = daze_dosfs_handles_peek(handles, dos_handle, host_fd);
   if (status == DAZE_DOSFS_OK &&
       flush_write_buffer(handles->write_buffers[dos_handle], *host_fd) != 0)

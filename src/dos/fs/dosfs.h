@@ -125,9 +125,9 @@ DazeDosfsStatus daze_dosfs_handles_duplicate(DazeDosfsHandles *handles, uint16_t
 DazeDosfsStatus daze_dosfs_handles_force_duplicate(DazeDosfsHandles *handles,
                                                    uint16_t source_handle, uint16_t target_handle,
                                                    int *host_errno);
-DazeDosfsStatus daze_dosfs_handles_get(const DazeDosfsHandles *handles, uint16_t dos_handle,
-                                       int *host_fd);
-/* Raw descriptor access is for writes that must retain pending buffered data. */
+DazeDosfsStatus daze_dosfs_handles_flush_and_get(const DazeDosfsHandles *handles,
+                                                 uint16_t dos_handle, int *host_fd);
+/* Lookup without flushing: for validity queries and writes that retain buffered data. */
 DazeDosfsStatus daze_dosfs_handles_peek(const DazeDosfsHandles *handles, uint16_t dos_handle,
                                         int *host_fd);
 DazeDosfsStatus daze_dosfs_handles_flush(const DazeDosfsHandles *handles, int *host_errno);

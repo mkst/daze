@@ -702,14 +702,20 @@ static void native_binding_contract(void) {
       daze_write_u32(guest + 0x5850, 0);
     }
   }
+  daze_kvm_rm_entry_publish_vectors(&vectors);
+  uint8_t saved_vectors[DAZE_KVM_RM_ENTRY_VECTOR_COUNT * DAZE_KVM_RM_ENTRY_VECTOR_STRIDE];
+  memcpy(saved_vectors, table, sizeof(saved_vectors));
   native_arm(&machine, &parked, 0x11000);
+  assert(memcmp(saved_vectors, table, sizeof(saved_vectors)) == 0);
   assert(install_return_bridge(&machine, &parked, 0x11000) == 1);
+  daze_kvm_rm_entry_publish_vectors(&vectors);
   state.run.s.regs.regs = (struct kvm_regs){.rax = 0x98765432};
   state.run.s.regs.sregs = parked.sregs;
   state.run.s.regs.sregs.cr0 &= ~UINT64_C(1);
   ParkedState restored;
   assert(native_parked(&machine, &restored) && restored.regs.rax == parked.regs.rax &&
-         restored.regs.rip == parked.regs.rip && restored.sregs.ss.base == parked.sregs.ss.base);
+         restored.regs.rip == parked.regs.rip &&
+         memcmp(&restored.sregs, &parked.sregs, sizeof(parked.sregs)) == 0);
   machine.guest_size = 1;
   assert(!native_parked(&machine, &restored));
   machine.guest_size = k_memory_size;
@@ -732,6 +738,12 @@ static void native_binding_contract(void) {
   assert(!daze_kvm_rm_procedure_reflect(&input, &successor));
   mediator.rm_procedure.frame_address = 0x11000;
   mediator.rm_procedure.stack_address = k_dpmi_rm_entry_linear;
+  assert(!daze_kvm_rm_procedure_reflect(&input, &successor));
+  mediator.rm_procedure.stack_address = 0x12000;
+  mediator.rm_procedure.frame_address = k_dpmi_rm_entry_reserved_linear;
+  assert(!daze_kvm_rm_procedure_reflect(&input, &successor));
+  mediator.rm_procedure.frame_address = 0x11000;
+  mediator.rm_procedure.stack_address = k_dpmi_rm_entry_reserved_linear;
   assert(!daze_kvm_rm_procedure_reflect(&input, &successor));
   mediator.rm_procedure_present = 0;
   for (unsigned kind = 0; kind < 8; ++kind) {

@@ -22,16 +22,18 @@ timers may include several subsequent native callbacks before the next
 protected exit. Guard rejections use the host entry path; real-mode DPMI
 services retain the host return path and its saved segment caches.
 
-The `rm_entry.S` and `write_batch.S` helper sources are kept as checked-in C
-byte arrays so normal builds need no assembler. Regenerate them with GNU
-binutils, passing the helper name to select its section table:
+Guest helper sources are kept as checked-in C byte arrays so normal builds need
+no assembler. Regenerate them with GNU binutils:
 
 ```sh
 python3 tools/generate_kvm_code.py rm_entry | .venv/bin/clang-format > src/backend/kvm/rm_entry_code.h
 python3 tools/generate_kvm_code.py write_batch | .venv/bin/clang-format > src/backend/kvm/write_batch_code.h
+python3 tools/generate_kvm_code.py exception_return | .venv/bin/clang-format > src/backend/kvm/exception_return_code.h
+python3 tools/generate_kvm_code.py exception_delivery | .venv/bin/clang-format > src/backend/kvm/exception_delivery_code.h
 ```
 
-Commit each regenerated header alongside its helper `.S` change.
+Update each generated header alongside its `.S` source. Linux CI checks all four
+with `python3 tools/generate_kvm_code.py --check`, ignoring formatting whitespace.
 
 Normal execution has no cumulative limit on serviced DOS/DPMI boundaries or
 backend continuations. Bounded diagnostic records do not limit command size.

@@ -133,7 +133,6 @@ typedef struct {
   uint64_t kvm_rm_procedure_setup_nanoseconds;
   uint64_t kvm_rm_procedure_setup_parked_capture_nanoseconds;
   uint64_t kvm_rm_procedure_setup_retire_nanoseconds;
-  uint64_t kvm_rm_procedure_setup_post_pio_capture_nanoseconds;
   uint64_t kvm_rm_procedure_setup_transition_nanoseconds;
   uint64_t kvm_rm_procedure_reflect_nanoseconds;
   uint64_t kvm_rm_procedure_reflect_runner_calls;

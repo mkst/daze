@@ -40,8 +40,8 @@ int daze_kvm_rm_entry_install(DazeKvmMachine *machine, uint32_t epilogue, uint32
                  "set descriptor helper stays below get base counter");
   uint8_t control[DAZE_KVM_RM_ENTRY_CONTROL_SIZE] = {0};
   daze_kvm_rm_entry_sync_metrics(machine);
-  daze_write_u32(control + 0x30, epilogue);
-  daze_write_u32(control + 0x68, DAZE_KVM_RM_ENTRY_SIGNATURE);
+  daze_write_u32(control + DAZE_KVM_RM_ENTRY_EPILOGUE_OFFSET, epilogue);
+  daze_write_u32(control + DAZE_KVM_RM_ENTRY_SIGNATURE_OFFSET, DAZE_KVM_RM_ENTRY_SIGNATURE);
   const char *setting = getenv("DAZE_KVM_GUEST_DESCRIPTORS");
   if (setting == NULL || strcmp(setting, "0") != 0) {
     /* The mediator targets its configured LDT, independently of the cached LDTR. */
@@ -80,9 +80,9 @@ enum {
    * the real-mode target far pointer is stored at CS:0160h. */
   RM_GATE_CS_BASE = 0x2000,
   RM_GATE_CS_SELECTOR = DAZE_SEL_GATE,
-  RM_TRAMPOLINE_LINEAR = 0x2140,
-  RM_TRAMPOLINE_IP = 0x0140,
-  RM_TARGET_LINEAR = 0x2160,
+  RM_TRAMPOLINE_LINEAR = k_dpmi_rm_trampoline_linear,
+  RM_TRAMPOLINE_IP = RM_TRAMPOLINE_LINEAR - RM_GATE_CS_BASE,
+  RM_TARGET_LINEAR = k_dpmi_rm_target_linear,
 };
 
 typedef struct {
@@ -98,8 +98,9 @@ static void native_arm(DazeKvmMachine *machine, const ParkedState *parked, uint3
   if (!daze_kvm_rm_entry_installed(machine)) return;
   const struct kvm_sregs *s = &parked->sregs;
   uint8_t *guest = machine->guest;
-  if (daze_read_u32(guest + 0x5830) == 0) return;
-  daze_write_u32(guest + DAZE_KVM_RM_ENTRY_CONTROL, 0);
+  uint8_t *control = guest + DAZE_KVM_RM_ENTRY_CONTROL;
+  if (daze_read_u32(control + DAZE_KVM_RM_ENTRY_EPILOGUE_OFFSET) == 0) return;
+  daze_write_u32(control, 0);
   if (s->cs.base != 0 || !s->cs.db || s->gdt.base != k_dpmi_gdt_address || s->gdt.limit != 0xffff ||
       s->ldt.base != k_dpmi_ldt_address || s->ldt.limit != 0xffff ||
       s->ss.selector != DAZE_SEL_DATA || s->ss.db || s->ss.limit != 0xffff ||
@@ -110,37 +111,39 @@ static void native_arm(DazeKvmMachine *machine, const ParkedState *parked, uint3
       (guest[k_dpmi_gdt_address + DAZE_SEL_CODE + 6] & 0x40) ||
       !return_bridge_eligible(machine, parked, frame_address))
     return;
-  if (!daze_read_u32(guest + 0x5850)) {
+  if (!daze_read_u32(control + DAZE_KVM_RM_ENTRY_RESERVED_DESCRIPTORS_OFFSET)) {
     for (size_t i = DAZE_SEL_RM_SS; i <= DAZE_SEL_RM_STACK + 7; ++i)
       if (guest[k_dpmi_gdt_address + i]) return;
-    daze_write_u32(guest + 0x5850, 1);
+    daze_write_u32(control + DAZE_KVM_RM_ENTRY_RESERVED_DESCRIPTORS_OFFSET, 1);
   }
   /* Real-mode loads retain cached attributes: establish 16-bit writable caches first. */
   for (unsigned sel = DAZE_SEL_RM_SS; sel <= DAZE_SEL_RM_GS; sel += 8)
     daze_dpmi_descriptor_encode(guest + k_dpmi_gdt_address + sel, 0, 0xffff, 0x93, 0);
   daze_dpmi_descriptor_encode(guest + k_dpmi_gdt_address + DAZE_SEL_RM_STACK,
                               k_dpmi_rm_return_bridge, 0xffff, 0x93, 0);
-  daze_write_u32(guest + 0x5804, (uint32_t)s->es.base);
+  daze_write_u32(control + DAZE_KVM_RM_ENTRY_ES_BASE_OFFSET, (uint32_t)s->es.base);
   const unsigned selectors[] = {DAZE_SEL_DATA, DAZE_SEL_CODE, DAZE_SEL_GATE, DAZE_SEL_GATE_CODE,
                                 DAZE_SEL_GATE_DATA};
-  for (size_t i = 0; i < 5; i++)
-    memcpy(guest + 0x5808 + i * 8, guest + k_dpmi_gdt_address + selectors[i], 8);
-  daze_write_u16(guest + 0x5834, s->gs.selector);
+  for (size_t i = 0; i < sizeof(selectors) / sizeof(selectors[0]); i++)
+    memcpy(control + DAZE_KVM_RM_ENTRY_DESCRIPTORS_OFFSET + i * 8,
+           guest + k_dpmi_gdt_address + selectors[i], 8);
+  daze_write_u16(control + DAZE_KVM_RM_ENTRY_GS_SELECTOR_OFFSET, s->gs.selector);
   if (s->gs.selector != 0) {
     const uint32_t descriptor =
       (uint32_t)((s->gs.selector & 4) ? s->ldt.base : s->gdt.base) + (s->gs.selector & ~7u);
-    daze_write_u32(guest + 0x5838, descriptor);
-    memcpy(guest + 0x5848, guest + descriptor, 8);
+    daze_write_u32(control + DAZE_KVM_RM_ENTRY_GS_DESCRIPTOR_ADDRESS_OFFSET, descriptor);
+    memcpy(control + DAZE_KVM_RM_ENTRY_GS_DESCRIPTOR_OFFSET, guest + descriptor, 8);
   }
-  _Static_assert(sizeof(*s) <= DAZE_KVM_RM_ENTRY_CONTROL_SIZE - 0x100, "saved segment state fits");
-  memcpy(guest + DAZE_KVM_RM_ENTRY_CONTROL + 0x100, s, sizeof(*s));
-  daze_write_u16(guest + 0x5854, s->gdt.limit);
-  daze_write_u32(guest + 0x5856, (uint32_t)s->gdt.base);
-  daze_write_u16(guest + 0x585a, s->ldt.selector);
-  daze_write_u16(guest + 0x585c, s->idt.limit);
-  daze_write_u32(guest + 0x585e, (uint32_t)s->idt.base);
-  daze_write_u32(guest + 0x5864, (uint32_t)s->cr0);
-  daze_write_u32(guest + DAZE_KVM_RM_ENTRY_CONTROL, 1);
+  _Static_assert(DAZE_KVM_RM_ENTRY_SAVED_SREGS + sizeof(*s) <= DAZE_KVM_RM_ENTRY_LINEAR,
+                 "saved segment state stays below entry code");
+  memcpy(guest + DAZE_KVM_RM_ENTRY_SAVED_SREGS, s, sizeof(*s));
+  daze_write_u16(control + DAZE_KVM_RM_ENTRY_GDT_LIMIT_OFFSET, s->gdt.limit);
+  daze_write_u32(control + DAZE_KVM_RM_ENTRY_GDT_BASE_OFFSET, (uint32_t)s->gdt.base);
+  daze_write_u16(control + DAZE_KVM_RM_ENTRY_LDT_SELECTOR_OFFSET, s->ldt.selector);
+  daze_write_u16(control + DAZE_KVM_RM_ENTRY_IDT_LIMIT_OFFSET, s->idt.limit);
+  daze_write_u32(control + DAZE_KVM_RM_ENTRY_IDT_BASE_OFFSET, (uint32_t)s->idt.base);
+  daze_write_u32(control + DAZE_KVM_RM_ENTRY_CR0_OFFSET, (uint32_t)s->cr0);
+  daze_write_u32(control, 1);
 }
 
 static int reloadable_segment(const DazeKvmMachine *machine, const struct kvm_sregs *sregs,
@@ -791,7 +794,7 @@ static int native_parked(DazeKvmMachine *machine, ParkedState *parked) {
                            DAZE_KVM_RM_ENTRY_CONTROL_SIZE))
     return 0;
   const uint8_t *guest = machine->guest;
-  memcpy(&parked->sregs, guest + DAZE_KVM_RM_ENTRY_CONTROL + 0x100, sizeof(parked->sregs));
+  memcpy(&parked->sregs, guest + DAZE_KVM_RM_ENTRY_SAVED_SREGS, sizeof(parked->sregs));
   if (daze_kvm_machine_get_regs(machine, &parked->regs) != DAZE_KVM_MACHINE_OK) return 0;
   const uint8_t *p = guest + DAZE_KVM_RM_ENTRY_PARKED;
   parked->regs.rax = daze_read_u32(p);
@@ -859,10 +862,10 @@ int daze_kvm_rm_procedure_reflect(const DazeKvmRmProcedureInput *input,
   const uint64_t started = metrics != NULL && metrics->enabled ? monotonic_nanoseconds() : 0;
   const DazeDpmiRmProcedure *const rm = &input->mediator->rm_procedure;
   if (daze_kvm_rm_entry_installed(machine) &&
-      (daze_guest_ranges_overlap(rm->frame_address, DAZE_DPMI_RM_FRAME_SIZE, k_dpmi_rm_entry_linear,
-                                 k_dpmi_rm_entry_size) ||
-       daze_guest_ranges_overlap(rm->stack_address, 4 + rm->parameter_bytes, k_dpmi_rm_entry_linear,
-                                 k_dpmi_rm_entry_size))) {
+      (daze_guest_ranges_overlap(rm->frame_address, DAZE_DPMI_RM_FRAME_SIZE,
+                                 k_dpmi_rm_entry_reserved_linear, k_dpmi_rm_entry_size) ||
+       daze_guest_ranges_overlap(rm->stack_address, 4 + rm->parameter_bytes,
+                                 k_dpmi_rm_entry_reserved_linear, k_dpmi_rm_entry_size))) {
     fprintf(stderr, "kvm-rm-procedure: frame or stack overlaps private callback entry\n");
     return 0;
   }
@@ -922,13 +925,9 @@ int daze_kvm_rm_procedure_reflect(const DazeKvmRmProcedureInput *input,
             obs->kind, obs->raw_exit_reason, retired.cs, (unsigned)retired.rip);
     return 0;
   }
-  const uint64_t post_pio_capture_started =
-    metrics != NULL && metrics->enabled ? monotonic_nanoseconds() : 0;
   /* The protected return belongs immediately after the validated OUT. */
   ParkedState post_pio = parked;
   post_pio.regs.rip += 2;
-  const uint64_t post_pio_capture_finished =
-    metrics != NULL && metrics->enabled ? monotonic_nanoseconds() : 0;
   uint8_t frame[DAZE_DPMI_RM_FRAME_SIZE];
   memcpy(frame, (const uint8_t *)machine->guest + rm->frame_address, sizeof(frame));
   if (input->mediator->rm_procedure_is_interrupt) {
@@ -1021,8 +1020,6 @@ int daze_kvm_rm_procedure_reflect(const DazeKvmRmProcedureInput *input,
       elapsed_nanoseconds(parked_capture_started, parked_capture_finished);
     metrics->kvm_rm_procedure_setup_retire_nanoseconds +=
       elapsed_nanoseconds(retire_started, retire_finished);
-    metrics->kvm_rm_procedure_setup_post_pio_capture_nanoseconds +=
-      elapsed_nanoseconds(post_pio_capture_started, post_pio_capture_finished);
     metrics->kvm_rm_procedure_setup_transition_nanoseconds +=
       elapsed_nanoseconds(transition_started, transition_finished);
     metrics->kvm_rm_procedure_reflect_nanoseconds +=

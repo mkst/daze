@@ -121,7 +121,7 @@ int daze_guest_layout_add_stable(DazeGuestLayout *layout) {
                    DAZE_GUEST_OWNER_KVM_EXCEPTION_DELIVERY) &&
          add_range(layout, k_dpmi_rm_return_bridge, k_dpmi_rm_return_bridge_size,
                    DAZE_GUEST_OWNER_KVM_RM_RETURN_BRIDGE) &&
-         add_range(layout, k_dpmi_rm_entry_linear, k_dpmi_rm_entry_size,
+         add_range(layout, k_dpmi_rm_entry_reserved_linear, k_dpmi_rm_entry_size,
                    DAZE_GUEST_OWNER_KVM_RM_ENTRY) &&
          add_range(layout, k_kvm_write_batch_code, k_kvm_write_batch_size,
                    DAZE_GUEST_OWNER_KVM_WRITE_BATCH);

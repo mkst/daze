@@ -305,4 +305,3 @@ fallback:
   popad
 fallback_ax:
   jmp far ptr cs:[DATA+48]
-

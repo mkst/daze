@@ -300,7 +300,6 @@ void daze_metrics_report_run(const DazeRunMetrics *metrics) {
         const uint64_t setup_accounted =
           metrics->kvm_rm_procedure_setup_parked_capture_nanoseconds +
           metrics->kvm_rm_procedure_setup_retire_nanoseconds +
-          metrics->kvm_rm_procedure_setup_post_pio_capture_nanoseconds +
           metrics->kvm_rm_procedure_setup_transition_nanoseconds;
         const uint64_t setup_other =
           metrics->kvm_rm_procedure_setup_nanoseconds > setup_accounted
@@ -342,10 +341,9 @@ void daze_metrics_report_run(const DazeRunMetrics *metrics) {
                   metrics->kvm_rm_procedure_bridged_calls);
         fprintf(stderr,
                 "metrics: kvm-rm-procedure-setup parked-capture=%.3fms retire=%.3fms "
-                "post-pio-capture=%.3fms transition=%.3fms other=%.3fms\n",
+                "transition=%.3fms other=%.3fms\n",
                 (double)metrics->kvm_rm_procedure_setup_parked_capture_nanoseconds / 1000000.0,
                 (double)metrics->kvm_rm_procedure_setup_retire_nanoseconds / 1000000.0,
-                (double)metrics->kvm_rm_procedure_setup_post_pio_capture_nanoseconds / 1000000.0,
                 (double)metrics->kvm_rm_procedure_setup_transition_nanoseconds / 1000000.0,
                 (double)setup_other / 1000000.0);
         const uint64_t resume_accounted = metrics->kvm_rm_procedure_resume_run_nanoseconds +

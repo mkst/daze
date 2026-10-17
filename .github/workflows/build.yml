@@ -36,6 +36,9 @@ jobs:
           sudo apt-get install -y build-essential clang ninja-build python3-venv
           "$CC" --version
           uname -a
+      - name: Check generated KVM helpers
+        if: matrix.cc == 'gcc'
+        run: python3 tools/generate_kvm_code.py --check
       - name: Require usable KVM
         run: |
           test -e /dev/kvm

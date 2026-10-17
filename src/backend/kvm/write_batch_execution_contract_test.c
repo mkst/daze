@@ -155,7 +155,7 @@ int main(void) {
       outcome = execute(&files, file.handle, batch, kind, &states[batch]);
       if (outcome == 77) break;
       int fd;
-      assert(daze_dosfs_handles_get(&handles, file.handle, &fd) == DAZE_DOSFS_OK);
+      assert(daze_dosfs_handles_flush_and_get(&handles, file.handle, &fd) == DAZE_DOSFS_OK);
       char bytes[6];
       assert(pread(fd, bytes, sizeof(bytes), 0) == sizeof(bytes));
       assert(memcmp(bytes, "abcabc", sizeof(bytes)) == 0);

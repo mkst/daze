@@ -106,7 +106,7 @@ static void sizes_and_disable(DazeDosfsFileService *files) {
   write_bytes(files, handle, "a", 1);
   write_bytes(files, handle, bytes, 32768);
   int fd;
-  assert(daze_dosfs_handles_get(files->handles, handle, &fd) == DAZE_DOSFS_OK);
+  assert(daze_dosfs_handles_flush_and_get(files->handles, handle, &fd) == DAZE_DOSFS_OK);
   struct stat information;
   assert(fstat(fd, &information) == 0 && information.st_size == 49153);
   assert(daze_dosfs_handles_write(files->handles, handle, NULL, 0) == 0);
@@ -167,7 +167,7 @@ static void deferred_errors(DazeDosfsFileService *files) {
   assert(daze_dosfs_file_write_character(files, '!', &host_errno) == DAZE_DOSFS_HOST_ERROR &&
          host_errno == EFBIG);
   assert(daze_dosfs_file_write_character(files, '!', NULL) == DAZE_DOSFS_HOST_ERROR);
-  assert(daze_dosfs_handles_get(files->handles, handle, &fd) == DAZE_DOSFS_HOST_ERROR &&
+  assert(daze_dosfs_handles_flush_and_get(files->handles, handle, &fd) == DAZE_DOSFS_HOST_ERROR &&
          errno == EFBIG);
   daze_dosfs_file_seek(files, handle, 0, 0, &result);
   assert(!result.success);
@@ -215,7 +215,7 @@ static void deferred_errors(DazeDosfsFileService *files) {
   assert(daze_dosfs_handles_close(files->handles, handle, &host_errno) == DAZE_DOSFS_HOST_ERROR &&
          host_errno == EFBIG);
   assert(setrlimit(RLIMIT_FSIZE, &saved) == 0);
-  assert(daze_dosfs_handles_get(files->handles, duplicate, &fd) == DAZE_DOSFS_OK);
+  assert(daze_dosfs_handles_flush_and_get(files->handles, duplicate, &fd) == DAZE_DOSFS_OK);
   char actual[64];
   assert(pread(fd, actual, sizeof(actual), 0) == sizeof(actual) &&
          memcmp(bytes, actual, sizeof(bytes)) == 0);

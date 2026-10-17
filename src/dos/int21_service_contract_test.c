@@ -583,7 +583,7 @@ int main(void) {
 
   int output_fd = -1;
   struct stat output_stat;
-  pass &= daze_dosfs_handles_get(&handles, write_handle, &output_fd) == DAZE_DOSFS_OK;
+  pass &= daze_dosfs_handles_flush_and_get(&handles, write_handle, &output_fd) == DAZE_DOSFS_OK;
   const off_t lengths[] = {2, 8};
   for (size_t i = 0; i < sizeof(lengths) / sizeof(lengths[0]); ++i) {
     pass &= lseek(output_fd, lengths[i], SEEK_SET) == lengths[i];

@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Emit the portable C byte arrays for the KVM guest-side assembly helpers.
 
-Usage: generate_kvm_code.py <profile>
+Usage: generate_kvm_code.py <profile> | --check [<profile>]
 
 Profiles and their section tables live in PROFILES below. The output is a
 header of static uint8_t arrays with the disassembly as per-instruction
 comments; pipe it through clang-format before applying it to the checked-in
 header.
 """
+import argparse
 import re
 import subprocess
 import sys
@@ -147,10 +148,25 @@ def generate(profile):
 
 
 def main():
-  if len(sys.argv) != 2 or sys.argv[1] not in PROFILES:
-    sys.stderr.write("usage: generate_kvm_code.py {%s}\n" % ",".join(PROFILES))
-    return 2
-  sys.stdout.write(generate(sys.argv[1]))
+  parser = argparse.ArgumentParser(description=__doc__)
+  parser.add_argument("profile", nargs="?", choices=PROFILES)
+  parser.add_argument("--check", action="store_true", help="Check headers without writing them")
+  args = parser.parse_args()
+  if args.check:
+    stale = False
+    for profile in (args.profile,) if args.profile else PROFILES:
+      source = REPO / PROFILES[profile]["source"]
+      header = source.with_name(source.stem + "_code.h")
+      # clang-format wraps arrays and aligns comments without changing their contents.
+      expected = re.sub(r"\s+", "", generate(profile))
+      actual = re.sub(r"\s+", "", header.read_text()) if header.exists() else None
+      if actual != expected:
+        print(f"Stale generated header: {header.relative_to(REPO)}", file=sys.stderr)
+        stale = True
+    return int(stale)
+  if args.profile is None:
+    parser.error("a profile is required unless --check is used")
+  sys.stdout.write(generate(args.profile))
   return 0
 
 

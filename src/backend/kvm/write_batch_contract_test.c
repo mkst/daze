@@ -312,7 +312,7 @@ int main(void) {
   metrics.enabled = 0;
   assert(daze_kvm_write_batch_drain(&machine, &files));
   assert(metrics.kvm_guest_write_calls == 2);
-  assert(daze_dosfs_handles_get(&handles, handle, &fd) == DAZE_DOSFS_OK);
+  assert(daze_dosfs_handles_flush_and_get(&handles, handle, &fd) == DAZE_DOSFS_OK);
   char bytes[8];
   assert(pread(fd, bytes, sizeof(bytes), 0) == sizeof(bytes));
   assert(memcmp(bytes, "abcdabcd", sizeof(bytes)) == 0);
