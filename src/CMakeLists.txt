@@ -477,6 +477,10 @@ if(BUILD_TESTING)
   add_test(NAME kvm-machine-contract COMMAND kvm_machine_contract_test)
   set_tests_properties(kvm-machine-contract PROPERTIES SKIP_RETURN_CODE 77)
   add_executable(kvm_machine_sync_contract_test backend/kvm/machine_sync_contract_test.c)
+  add_executable(kvm_io_drain_contract_test backend/kvm/io_drain_contract_test.c)
+  daze_configure_c11_pedantic_target(kvm_io_drain_contract_test PRIVATE)
+  target_link_libraries(kvm_io_drain_contract_test PRIVATE daze_kvm_machine)
+  daze_register_simple_contract_test(kvm-io-drain-contract kvm_io_drain_contract_test)
   add_executable(kvm_machine_boundary_contract_test backend/kvm/machine_boundary_contract_test.c)
   daze_configure_c11_pedantic_target(kvm_machine_boundary_contract_test PRIVATE)
   target_link_libraries(kvm_machine_boundary_contract_test PRIVATE daze_kvm_machine)
@@ -543,6 +547,23 @@ if(BUILD_TESTING)
 endif()
 
 
+add_library(daze_kvm_write_batch STATIC backend/kvm/write_batch.c)
+daze_configure_c11_pedantic_target(daze_kvm_write_batch PUBLIC)
+target_link_libraries(daze_kvm_write_batch PUBLIC daze_kvm_machine daze_dosfs daze_guest_memory_layout)
+
+if(BUILD_TESTING)
+  add_executable(kvm_write_batch_contract_test backend/kvm/write_batch_contract_test.c)
+  daze_configure_c11_pedantic_target(kvm_write_batch_contract_test PRIVATE)
+  target_link_libraries(kvm_write_batch_contract_test PRIVATE daze_dosfs daze_guest_memory_layout)
+  daze_register_simple_contract_test(kvm-write-batch-contract kvm_write_batch_contract_test)
+  add_executable(kvm_write_batch_execution_contract_test backend/kvm/write_batch_execution_contract_test.c)
+  daze_configure_c11_pedantic_target(kvm_write_batch_execution_contract_test PRIVATE)
+  target_link_libraries(kvm_write_batch_execution_contract_test PRIVATE daze_kvm_runner)
+  add_test(NAME kvm-write-batch-execution-contract COMMAND kvm_write_batch_execution_contract_test)
+  set_tests_properties(kvm-write-batch-execution-contract PROPERTIES
+    SKIP_RETURN_CODE 77 TIMEOUT 10)
+endif()
+
 add_library(daze_kvm_runner STATIC
   backend/kvm/runner/runner.c
   backend/kvm/int21_adapter.c
@@ -564,7 +585,7 @@ add_library(daze_kvm_runner STATIC
 )
 daze_configure_c11_pedantic_target(daze_kvm_runner PUBLIC)
 target_link_libraries(daze_kvm_runner PUBLIC
-  daze_kvm_machine daze_kvm_runner_gate_resume daze_dos_int21_service daze_dosfs daze_dos_memory daze_mz_layout daze_kvm_process_layout daze_guest_memory_layout
+  daze_kvm_write_batch daze_kvm_machine daze_kvm_runner_gate_resume daze_dos_int21_service daze_dosfs daze_dos_memory daze_mz_layout daze_kvm_process_layout daze_guest_memory_layout
 )
 
 if(BUILD_TESTING AND DAZE_HAS_UNICORN)
@@ -584,6 +605,11 @@ daze_configure_c11_pedantic_target(daze_kvm_dpmi_entry PUBLIC)
 target_link_libraries(daze_kvm_dpmi_entry PUBLIC daze_kvm_machine daze_kvm_runner)
 if(BUILD_TESTING)
   add_executable(kvm_dpmi_entry_contract_test backend/kvm/dpmi/entry_contract_test.c)
+  add_executable(kvm_virtual_interrupt_contract_test backend/kvm/gate/virtual_interrupt_contract_test.c)
+  daze_configure_c11_pedantic_target(kvm_virtual_interrupt_contract_test PRIVATE)
+  target_link_libraries(kvm_virtual_interrupt_contract_test PRIVATE daze_kvm_protected_gate daze_kvm_child_context)
+  add_test(NAME kvm-virtual-interrupt-contract COMMAND kvm_virtual_interrupt_contract_test)
+  set_tests_properties(kvm-virtual-interrupt-contract PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 10)
   daze_configure_c11_pedantic_target(kvm_dpmi_entry_contract_test PRIVATE)
   target_link_libraries(kvm_dpmi_entry_contract_test PRIVATE daze_kvm_dpmi_entry daze_kvm_protected_gate)
   add_executable(kvm_entry_observation_contract_test backend/kvm/dpmi/entry_observation_contract_test.c)
@@ -740,6 +766,9 @@ if(BUILD_TESTING)
   daze_configure_c11_pedantic_target(kvm_owner_boundary_contract_test PRIVATE)
   target_link_libraries(kvm_owner_boundary_contract_test PRIVATE daze_kvm_command_owner)
   daze_register_simple_contract_test(kvm-owner-boundary-contract kvm_owner_boundary_contract_test)
+  add_test(NAME kvm-raw-continuation-contract COMMAND kvm_owner_boundary_contract_test --raw-switch)
+  set_tests_properties(kvm-raw-continuation-contract PROPERTIES
+    SKIP_RETURN_CODE 77 LABELS "local;contract;requires-kvm")
   add_test(NAME kvm-command-owner-contract COMMAND kvm_command_owner_contract_test)
   set_tests_properties(kvm-command-owner-contract PROPERTIES SKIP_RETURN_CODE 77)
   add_test(NAME kvm-command-owner-trace-contract COMMAND kvm_command_owner_contract_test --trace-contract)
@@ -898,6 +927,12 @@ if(BUILD_TESTING)
   daze_register_simple_contract_test(kvm-protected-execution-contract kvm_protected_execution_contract_test)
   set_tests_properties(kvm-protected-execution-contract PROPERTIES
     SKIP_RETURN_CODE 77 LABELS "local;contract;requires-kvm" TIMEOUT 10)
+  add_executable(kvm_descriptor_contract_test backend/kvm/gate/descriptor_contract_test.c)
+  daze_configure_c11_pedantic_target(kvm_descriptor_contract_test PRIVATE)
+  target_link_libraries(kvm_descriptor_contract_test PRIVATE daze_kvm_protected_gate daze_kvm_rm_procedure)
+  daze_register_simple_contract_test(kvm-descriptor-contract kvm_descriptor_contract_test)
+  set_tests_properties(kvm-descriptor-contract PROPERTIES
+    SKIP_RETURN_CODE 77 LABELS "local;contract;requires-kvm" TIMEOUT 10)
   daze_configure_c11_pedantic_target(kvm_legacy_exception_contract_test PRIVATE)
   target_link_libraries(kvm_legacy_exception_contract_test PRIVATE daze_kvm_protected_gate)
   add_test(NAME kvm-legacy-exception-contract COMMAND kvm_legacy_exception_contract_test)
@@ -950,7 +985,7 @@ add_library(daze_kvm_rm_procedure STATIC backend/kvm/rm_procedure.c)
 daze_configure_c11_pedantic_target(daze_kvm_rm_procedure PUBLIC)
 target_link_libraries(daze_kvm_rm_procedure PUBLIC
   daze_kvm_machine daze_kvm_dpmi_entry daze_kvm_dpmi_mediator daze_kvm_runner_gate_resume
-  daze_dpmi_request
+  daze_dpmi_request daze_dpmi_descriptor daze_kvm_write_batch
 )
 
 add_library(daze_kvm_state_save_gate STATIC backend/kvm/gate/state_save.c)
@@ -1234,6 +1269,10 @@ if(BUILD_TESTING)
   daze_configure_c11_pedantic_target(file_service_contract_test PRIVATE)
   target_link_libraries(file_service_contract_test PRIVATE daze_dosfs)
   daze_register_simple_contract_test(dos-file-service-contract file_service_contract_test)
+  add_executable(write_buffer_contract_test dos/fs/write_buffer_contract_test.c)
+  daze_configure_c11_pedantic_target(write_buffer_contract_test PRIVATE)
+  target_link_libraries(write_buffer_contract_test PRIVATE daze_dos_int21_service)
+  daze_register_simple_contract_test(dos-write-buffer-contract write_buffer_contract_test)
   add_executable(dosfs_boundary_contract_test dos/fs/dosfs_boundary_contract_test.c)
   daze_configure_c11_pedantic_target(dosfs_boundary_contract_test PRIVATE)
   target_link_libraries(dosfs_boundary_contract_test PRIVATE daze_dosfs)

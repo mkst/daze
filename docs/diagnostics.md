@@ -4,11 +4,119 @@
 counters. `--debug` adds service and loader messages. These controls are
 independent of instruction tracing.
 
+`kvm-dpmi-host debug-update` counts actual debug configuration ioctls across
+KVM continuations. `kvm-debug-update-elisions` counts identical return-breakpoint
+configurations retained after I/O exits; it does not count removed debug exits.
+
+`kvm-rm-procedure-bridged` counts callbacks whose guest return stub resumes the
+protected caller without an intermediate userspace exit. For these callbacks,
+`reflect` and its `KVM_RUN` time include protected execution to the next exit;
+they do not isolate real-mode callback overhead. Descriptor-cache mismatches,
+real-mode DPMI services and protected-return breakpoints retain the host return
+path. Callback phase timers are nested, so do not add them to KVM_RUN totals.
+
+`kvm-rm-procedure-native` counts eligible 0301h requests that enter real mode
+through the guest helper. Add it to the host detour count on the
+`kvm-rm-procedure total` line for the logical callback count. A host detour's
+timers may include several subsequent native callbacks before the next
+protected exit. Guard rejections use the host entry path; real-mode DPMI
+services retain the host return path and its saved segment caches.
+
+Guest helper sources are kept as checked-in C byte arrays so normal builds need
+no assembler. Regenerate them with GNU binutils:
+
+```sh
+python3 tools/generate_kvm_code.py rm_entry | .venv/bin/clang-format > src/backend/kvm/rm_entry_code.h
+python3 tools/generate_kvm_code.py write_batch | .venv/bin/clang-format > src/backend/kvm/write_batch_code.h
+python3 tools/generate_kvm_code.py exception_return | .venv/bin/clang-format > src/backend/kvm/exception_return_code.h
+python3 tools/generate_kvm_code.py exception_delivery | .venv/bin/clang-format > src/backend/kvm/exception_delivery_code.h
+```
+
+Update each generated header alongside its `.S` source. Linux CI checks all four
+with `python3 tools/generate_kvm_code.py --check`, ignoring formatting whitespace.
+
 Normal execution has no cumulative limit on serviced DOS/DPMI boundaries or
 backend continuations. Bounded diagnostic records do not limit command size.
 Unicorn retains its per-emulation instruction guard. To bound elapsed time,
 use host process cancellation or an external timeout (for example,
 `timeout 60s ./build/debug/daze --backend kvm --mount "$work_dir" TOOL.EXE`).
+
+## KVM capture retirement
+
+Legacy #NP capture retires its pending OUT using `KVM_CAP_IMMEDIATE_EXIT` when
+available; other kernels retain the breakpoint rendezvous. `kvm-io-drain` reports
+completion-only calls, time and failures separately from guest-executing runs.
+
+The KVM legacy exception return helper restores supported caller frames in the
+guest. `kvm-exception-return guest=N host=N` counts completed guest returns and
+host restorations. Tiny or changed stack frames and returns involving raw mode
+switches or real-mode callbacks retain host restoration. Faults inside the
+helper remain failures; they are not treated as a completed client return.
+
+After a validated host delivery, supported #NP captures can also build the frame
+and enter the registered application handler in the guest. `kvm-exception-delivery
+guest=N host=N` reports these deliveries separately from returns. Changed tables,
+descriptors or unsupported stacks/instructions retain host capture. The existing
+`DAZE_KVM_LEGACY_TRACE` diagnostic forces host capture for per-delivery records.
+
+## KVM guest descriptor services
+
+The normal protected gate handles valid DPMI 0006h/0007h/0008h/0009h/000Ch descriptor
+queries and updates in the guest. Rejected requests retain the host path.
+`--metrics` reports completed guest services as `kvm-guest-descriptors`;
+`kvm-dpmi-functions` counts hosted requests. Set `DAZE_KVM_GUEST_DESCRIPTORS=0`
+to route all five services through the host for comparison. Get Segment Base and
+Set Descriptor require published GDT/LDT bounds; missing metadata and paging
+retain the host path.
+
+## KVM guest vector queries
+
+The normal protected gate handles DPMI 0204h queries in the guest using the
+resolved software vectors. Setters remain hosted. `--metrics` reports guest
+queries as `kvm-guest-vector-queries`; `kvm-dpmi-functions` counts hosted
+requests. Set `DAZE_KVM_GUEST_VECTORS=0` to use hosted queries for comparison.
+Missing cached state and paged guests retain the host path.
+
+## KVM guest memory backing
+
+KVM requests transparent huge pages for its aligned guest memory mapping.
+Unavailable huge pages or failed advice retain ordinary-page operation.
+Set `DAZE_KVM_HUGEPAGES=0` to use the original allocation policy:
+
+```sh
+DAZE_KVM_HUGEPAGES=0 ./build/debug/daze --backend kvm --mount "$work_dir" TOOL.EXE
+```
+
+Huge pages can reduce host/KVM page faults, but may increase resident memory
+and allocation latency under memory pressure. No reserved huge-page pool or
+host kernel configuration change is required.
+
+## File write buffering
+
+Regular output files use a 16 KiB write buffer on both backends. Set the host
+environment variable `DAZE_BUFFERED_WRITES=0` to use immediate writes:
+
+```sh
+DAZE_BUFFERED_WRITES=0 ./build/debug/daze --backend kvm --mount "$work_dir" TOOL.EXE
+```
+
+KVM can also batch real-mode DOS writes inside eligible native callbacks.
+Guest bytes use only the unused capacity of the existing 16 KiB buffer;
+they are drained before host operations and lifecycle changes. Unsupported
+contexts and writes exceeding available credit use the host service.
+`DAZE_BUFFERED_WRITES=0` disables this path as well. Metrics retain logical
+file-write totals; `kvm-guest-writes` reports requests and bytes handled in
+the guest, while broker counts report actual host crossings.
+
+The write helper's checked-in C arrays are regenerated as described above.
+
+Reads, seeks, metadata access and close flush pending data. Duplicate and
+inherited handles share the buffer; independently opened handles to the same
+file disable buffering for that file. Host standard streams and devices remain
+unbuffered. Small writes can report success before a disk-full, quota or
+file-size error is discovered during a later flush. Flush failures are returned
+to the guest; failures during implicit exit cleanup also make the host exit
+nonzero. Process cancellation can lose data still in the buffer.
 
 ## Unicorn instruction trace
 

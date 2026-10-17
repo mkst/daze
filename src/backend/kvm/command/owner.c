@@ -22,6 +22,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "rm_entry.h"
+#include "write_batch.h"
+
 static int continue_from_handoff(DazeKvmCommandOwnerHandoff *handoff,
                                  const DazeKvmCommandOwnerInput *input,
                                  const DazeKvmDpmiEntryResult *live_boundary,
@@ -42,9 +45,6 @@ int daze_kvm_command_owner_reply_exec_success(DazeKvmMachine *machine) {
   const int capture = daze_kvm_runner_gate_frame_capture(machine, DAZE_INT_DOS, &frame);
   if (capture != DAZE_KVM_RUNNER_GATE_RESUME_OK) return capture;
   if (frame.ax != 0x4b00) return DAZE_KVM_RUNNER_GATE_RESUME_INVALID;
-  /* The gate discards its saved AX before IRET. Supply the successful EXEC
-   * return while preserving every other reply register from its captured
-   * frame, and change only CF in the already-pushed FLAGS word. */
   daze_write_u16(reply, 0);
   daze_write_u16(reply + 2, frame.bx);
   daze_write_u16(reply + 4, frame.cx);
@@ -126,6 +126,14 @@ static int plan_entry_layout(const DazeKvmTransitionPlan *plan,
     writes[index] = plan->writes[index];
   size_t write_count = plan->write_count;
   if (gate != NULL && gate_artifacts != NULL) {
+    if (gate->virtual_handler_address) {
+      writes[write_count++] = (DazeKvmGuestWrite){.address = gate->virtual_handler_address,
+                                                  .bytes = gate_artifacts->virtual_handler,
+                                                  .size = gate_artifacts->virtual_handler_size};
+      writes[write_count++] = (DazeKvmGuestWrite){.address = gate->virtual_control_address,
+                                                  .bytes = gate_artifacts->virtual_control,
+                                                  .size = sizeof(gate_artifacts->virtual_control)};
+    }
     writes[write_count++] = (DazeKvmGuestWrite){.address = gate->handler_address,
                                                 .bytes = gate_artifacts->handler,
                                                 .size = gate_artifacts->handler_size};
@@ -165,6 +173,20 @@ static int plan_entry_layout(const DazeKvmTransitionPlan *plan,
       (DazeKvmGuestWrite){.address = raw_gate->idt_address + DAZE_KVM_RAW_SWITCH_GATE_VECTOR * 8u,
                           .bytes = raw_gate_artifacts->idt_entry,
                           .size = sizeof(raw_gate_artifacts->idt_entry)};
+  }
+  if (gate != NULL && gate->virtual_handler_address != 0) {
+    for (size_t i = plan->write_count; i < plan->write_count + 2; i++) {
+      if (!daze_kvm_range_fits_nonempty(guest_size, writes[i].address, writes[i].size)) return 0;
+      for (size_t j = 0; j < write_count; j++)
+        if (i != j && daze_kvm_ranges_overlap(writes[i].address, writes[i].size, writes[j].address,
+                                              writes[j].size))
+          return 0;
+      for (size_t j = 0; j < plan->reserved_range_count; j++)
+        if (daze_kvm_ranges_overlap(writes[i].address, writes[i].size,
+                                    plan->reserved_ranges[j].address,
+                                    plan->reserved_ranges[j].size))
+          return 0;
+    }
   }
   *layout =
     (DazeKvmDpmiEntryLayout){.writes = writes,
@@ -331,6 +353,8 @@ static DazeKvmDpmiMediator mediator_for_gate(DazeKvmMachine *machine,
    * selector:offset pair. */
   mediator.default_interrupt_vectors[DAZE_INT_DOS] =
     daze_kvm_command_owner_default_vector21(layout);
+  daze_kvm_rm_entry_publish_vectors(&mediator);
+  daze_kvm_rm_entry_publish_descriptors(&mediator);
   return mediator;
 }
 
@@ -932,6 +956,18 @@ static int resume_exec_parent(DazeKvmCommandOwnerHandoff *handoff,
   return DAZE_KVM_COMMAND_OWNER_POSTSTART_FAILED;
 }
 
+static int continue_raw_switch(DazeKvmMachine *machine, uint32_t linear, unsigned legacy_depth,
+                               DazeKvmDpmiEntryResult *boundary) {
+  if (machine == NULL || boundary == NULL || machine->vcpu < 0 || machine->run == NULL ||
+      machine->guest == NULL || !daze_kvm_range_fits(machine->guest_size, linear, 1)) {
+    if (boundary != NULL) *boundary = (DazeKvmDpmiEntryResult){0};
+    return DAZE_KVM_DPMI_ENTRY_INVALID;
+  }
+  /* Active legacy exception delivery owns a return breakpoint. */
+  return legacy_depth ? daze_kvm_dpmi_entry_continue_to_linear(machine, linear, boundary)
+                      : daze_kvm_dpmi_entry_continue_once(machine, boundary);
+}
+
 static int
 dispatch_boundaries(DazeKvmCommandOwnerHandoff *handoff, const DazeKvmCommandOwnerInput *input,
                     const DazeKvmTransitionPlanInput *plan_input,
@@ -947,11 +983,39 @@ dispatch_boundaries(DazeKvmCommandOwnerHandoff *handoff, const DazeKvmCommandOwn
     initial_boundary != NULL ? *initial_boundary : result->protected_gate.terminal;
   int first_boundary = 1;
   for (;;) {
+    if (!daze_kvm_legacy_exception_reconcile(machine, &legacy, &boundary)) {
+      result->post_successor = boundary;
+      result->post_successor_present = 1;
+      return DAZE_KVM_COMMAND_OWNER_POSTSTART_FAILED;
+    }
+    if (!daze_kvm_write_batch_drain(machine, input->preflight.process.files))
+      return DAZE_KVM_COMMAND_OWNER_POSTSTART_FAILED;
+    daze_kvm_rm_entry_sync_metrics(machine);
+    if (gate->rm_entry_address && daze_kvm_rm_entry_active(machine) &&
+        daze_read_u16((const uint8_t *)machine->guest + 0x2a42) == 0 && !(boundary.cr0 & 1)) {
+      DazeKvmDpmiMediator native_mediator = mediator_for_gate(
+        machine, plan_input, gate, &input->transition_layout, input->state, dos_memory);
+      const DazeKvmRmProcedureInput native = {.machine = machine,
+                                              .mediator = &native_mediator,
+                                              .files = input->preflight.process.files,
+                                              .process_state = process_state,
+                                              .dpmi_entry_segment =
+                                                input->preflight.process.dpmi_entry_segment};
+      if (!daze_kvm_rm_entry_continue(&native, &boundary))
+        return DAZE_KVM_COMMAND_OWNER_POSTSTART_FAILED;
+      mediator_commit(&native_mediator, input->state);
+      continue;
+    }
+    if (!daze_kvm_protected_gate_sync_virtual_interrupts(machine, gate,
+                                                         &input->state->virtual_interrupts_enabled))
+      return DAZE_KVM_COMMAND_OWNER_POSTSTART_FAILED;
     if (!daze_kvm_resident_vector_projections_refresh(machine, &handoff->resident_gdt, dos_memory))
       return DAZE_KVM_COMMAND_OWNER_POSTSTART_FAILED;
     result->post_successor = boundary;
     result->post_successor_present = 1;
     if (gate->legacy_np_capture_address != 0) {
+      if (legacy.depth || boundary.observation.kind != DAZE_KVM_DPMI_ENTRY_EXIT_PIO)
+        daze_kvm_rm_entry_invalidate(machine);
       int legacy_status =
         daze_kvm_legacy_exception_boundary(machine, gate, input->state, &legacy, &boundary);
       if (legacy_status < 0) {
@@ -990,6 +1054,7 @@ dispatch_boundaries(DazeKvmCommandOwnerHandoff *handoff, const DazeKvmCommandOwn
 
       continue;
     }
+    if (classification != DAZE_KVM_COMMAND_BOUNDARY_MEDIATOR) daze_kvm_rm_entry_invalidate(machine);
     switch (classification) {
     case DAZE_KVM_COMMAND_BOUNDARY_MEDIATOR: {
       uint16_t function, selector;
@@ -997,6 +1062,7 @@ dispatch_boundaries(DazeKvmCommandOwnerHandoff *handoff, const DazeKvmCommandOwn
       if (!capture_mediator_request(machine, gate, &boundary, &function, &selector, &operand)) {
         return DAZE_KVM_COMMAND_OWNER_POSTSTART_FAILED;
       }
+      if (function != 0x0301 || legacy.depth) daze_kvm_rm_entry_invalidate(machine);
       result->post_return_function = function;
       result->post_return_selector = selector;
       result->post_return_operand = operand;
@@ -1015,6 +1081,7 @@ dispatch_boundaries(DazeKvmCommandOwnerHandoff *handoff, const DazeKvmCommandOwn
         machine, &mediator, gate, &boundary, &exchange, &successor);
 
       if (result->post_return_gate_status == DAZE_KVM_PROTECTED_GATE_RM_PROCEDURE) {
+        daze_kvm_legacy_exception_host_return(machine, &legacy);
         const DazeKvmRmProcedureInput reflect = {
           .machine = machine,
           .mediator = &mediator,
@@ -1022,7 +1089,9 @@ dispatch_boundaries(DazeKvmCommandOwnerHandoff *handoff, const DazeKvmCommandOwn
           .process_state = process_state,
           .dpmi_entry_segment = input->preflight.process.dpmi_entry_segment,
           .protected_return_linear =
-            legacy.depth == 0 ? 0 : legacy.deliveries[legacy.depth - 1].return_linear,
+            legacy.depth == 0 || daze_kvm_legacy_exception_guest_return(&legacy)
+              ? 0
+              : legacy.deliveries[legacy.depth - 1].return_linear,
         };
         result->post_return_gate_status = daze_kvm_rm_procedure_reflect(&reflect, &successor)
                                             ? DAZE_KVM_PROTECTED_GATE_OK
@@ -1186,6 +1255,7 @@ dispatch_boundaries(DazeKvmCommandOwnerHandoff *handoff, const DazeKvmCommandOwn
       break;
     }
     case DAZE_KVM_COMMAND_BOUNDARY_RAW: {
+      daze_kvm_legacy_exception_host_return(machine, &legacy);
       DazeKvmRawSwitchGateResult raw;
       const int raw_status =
         daze_kvm_raw_switch_gate_run_from_boundary(machine, raw_gate, &boundary, &raw);
@@ -1236,9 +1306,9 @@ dispatch_boundaries(DazeKvmCommandOwnerHandoff *handoff, const DazeKvmCommandOwn
           daze_kvm_raw_switch_gate_return_to_protected(machine, raw_gate, &layout, &raw.request);
         const int continue_status =
           return_status == DAZE_KVM_RAW_SWITCH_GATE_OK
-            ? daze_kvm_dpmi_entry_continue_to_linear(
+            ? continue_raw_switch(
                 machine, ((uint32_t)preflight->dpmi_handoff.caller_return_cs << 4) + raw.request.di,
-                &boundary)
+                daze_kvm_legacy_exception_guest_return(&legacy) ? 0 : legacy.depth, &boundary)
             : DAZE_KVM_DPMI_ENTRY_INVALID;
         if (getenv("DAZE_EXEC_TRACE") != NULL)
           fprintf(stderr,
@@ -1253,9 +1323,9 @@ dispatch_boundaries(DazeKvmCommandOwnerHandoff *handoff, const DazeKvmCommandOwn
           return DAZE_KVM_COMMAND_OWNER_POSTSTART_FAILED;
         }
       } else {
-        if (daze_kvm_dpmi_entry_continue_to_linear(machine,
-                                                   ((uint32_t)raw.request.si << 4) + raw.request.di,
-                                                   &boundary) != DAZE_KVM_DPMI_ENTRY_OK) {
+        if (continue_raw_switch(machine, ((uint32_t)raw.request.si << 4) + raw.request.di,
+                                daze_kvm_legacy_exception_guest_return(&legacy) ? 0 : legacy.depth,
+                                &boundary) != DAZE_KVM_DPMI_ENTRY_OK) {
           return DAZE_KVM_COMMAND_OWNER_POSTSTART_FAILED;
         }
       }
@@ -1386,6 +1456,8 @@ static int continue_from_handoff(DazeKvmCommandOwnerHandoff *handoff,
     result->disposition = DAZE_KVM_COMMAND_OWNER_POSTSTART_FAILED;
     goto out;
   }
+  if (gate != NULL && gate->virtual_control_address && live_boundary != NULL)
+    gate_artifacts.virtual_control[0] = input->state->virtual_interrupts_enabled != 0;
   if (state_gate != NULL && !daze_kvm_state_save_gate_build(state_gate, &state_gate_artifacts)) {
     result->disposition = DAZE_KVM_COMMAND_OWNER_POSTSTART_FAILED;
     goto out;
@@ -1394,7 +1466,7 @@ static int continue_from_handoff(DazeKvmCommandOwnerHandoff *handoff,
     result->disposition = DAZE_KVM_COMMAND_OWNER_POSTSTART_FAILED;
     goto out;
   }
-  DazeKvmGuestWrite writes[DAZE_KVM_TRANSITION_PLAN_WRITE_COUNT + 11];
+  DazeKvmGuestWrite writes[DAZE_KVM_TRANSITION_PLAN_WRITE_COUNT + 13];
   DazeKvmDpmiEntryLayout entry_layout;
   const DazeKvmTransitionWriterInput writer = {
     &machine,
@@ -1487,6 +1559,12 @@ static int continue_from_handoff(DazeKvmCommandOwnerHandoff *handoff,
         result->transition_status = DAZE_KVM_TRANSITION_WRITER_OK;
       }
       if (result->transition_status == DAZE_KVM_TRANSITION_WRITER_OK) {
+        if (gate != NULL && !daze_kvm_rm_entry_install(&machine, gate_artifacts.rm_entry_epilogue,
+                                                       input->transition_layout.ldt_address,
+                                                       DAZE_DPMI_TRANSITION_LDT_SIZE)) {
+          result->transition_status = DAZE_KVM_DPMI_ENTRY_INVALID;
+          goto out;
+        }
         result->transition_stage = 4;
         result->transition_status = DAZE_KVM_DPMI_ENTRY_OK;
         result->transition_successor = *live_boundary;
@@ -1505,6 +1583,12 @@ static int continue_from_handoff(DazeKvmCommandOwnerHandoff *handoff,
           result->transition_status = DAZE_KVM_DPMI_ENTRY_INVALID;
         } else {
           result->transition_stage = 3;
+          if (gate != NULL && !daze_kvm_rm_entry_install(&machine, gate_artifacts.rm_entry_epilogue,
+                                                         input->transition_layout.ldt_address,
+                                                         DAZE_DPMI_TRANSITION_LDT_SIZE)) {
+            result->transition_status = DAZE_KVM_DPMI_ENTRY_INVALID;
+            goto out;
+          }
           result->transition_status = daze_kvm_dpmi_entry_run(
             &machine, &preflight.dpmi_handoff, &entry_layout, &result->transition_successor);
           result->transition_stage = 4;
@@ -1554,6 +1638,8 @@ static int continue_from_handoff(DazeKvmCommandOwnerHandoff *handoff,
     daze_kvm_transition_plan_report(&plan_input, &plan_failure);
   result->disposition = DAZE_KVM_COMMAND_OWNER_POSTSTART_FAILED;
 out:
+  if (!daze_kvm_write_batch_drain(&machine, input->preflight.process.files))
+    result->disposition = DAZE_KVM_COMMAND_OWNER_POSTSTART_FAILED;
 #undef process_state
 #undef dos_memory
 #undef machine
@@ -1657,6 +1743,7 @@ int daze_kvm_command_owner_start_exec(DazeKvmCommandOwnerHandoff *handoff,
 
 void daze_kvm_command_owner_handoff_destroy(DazeKvmCommandOwnerHandoff *handoff) {
   if (handoff == NULL || !handoff->active) return;
+  (void)daze_kvm_write_batch_drain(&handoff->machine, handoff->process.files);
   daze_dosfs_exec_handles_dispose(&handoff->child_handles);
   daze_kvm_child_context_dispose(&handoff->child);
   daze_kvm_resident_gdt_state_dispose(&handoff->resident_gdt);

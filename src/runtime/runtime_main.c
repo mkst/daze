@@ -289,8 +289,14 @@ int daze_runtime_main(int argc, char **argv) {
   report_kvm_terminal_observation(debug, &kvm_diagnostic, &kvm_observation);
   report_kvm_selection_metrics(metrics, &launch.run_metrics, &kvm_diagnostic);
 
+  int write_errno = launch.handles.teardown_errno;
+  int flush_errno = 0;
+  if (daze_dosfs_handles_flush(&launch.handles, &flush_errno) != DAZE_DOSFS_OK)
+    write_errno = flush_errno;
+  if (write_errno != 0) fprintf(stderr, "cannot flush DOS output: %s\n", strerror(write_errno));
   dispose_prepared_launch(&launch);
   /* A clean emulator stop is not command success; normal completion requires top-level
    * DOS AH=4Ch. */
-  return daze_command_result_host_status(&command);
+  const int status = daze_command_result_host_status(&command);
+  return write_errno != 0 && status == 0 ? 3 : status;
 }

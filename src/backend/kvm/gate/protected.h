@@ -21,6 +21,9 @@ enum {
   DAZE_KVM_PROTECTED_GATE_UNAVAILABLE = 77,
   /* The 16-bit CPU frame needs three MOVZX loads and operand-size prefixes. */
   DAZE_KVM_PROTECTED_GATE_HANDLER_MAX_SIZE = 197,
+  DAZE_KVM_PROTECTED_GATE_VIRTUAL_PREFIX_SIZE = 20,
+  DAZE_KVM_PROTECTED_GATE_VIRTUAL_HANDLER_SIZE = 64,
+  DAZE_KVM_PROTECTED_GATE_VIRTUAL_CONTROL_SIZE = 20,
   /* A client-installed 16-bit vector handler chains here with the processor's
    * six-byte IP:CS:FLAGS frame.  The adapter expands that exact frame for the
    * 32-bit protected DOS gate before jumping to it. */
@@ -49,17 +52,24 @@ typedef struct {
   uint8_t exception_gate_vector;
   uint8_t exception_gate_type;
   uint32_t legacy_np_capture_address;
+  uint32_t virtual_handler_address, virtual_control_address;
+  uint32_t rm_entry_address;
 } DazeKvmProtectedGateLayout;
 
 typedef struct {
-  uint8_t handler[DAZE_KVM_PROTECTED_GATE_HANDLER_MAX_SIZE];
+  uint8_t
+    handler[DAZE_KVM_PROTECTED_GATE_HANDLER_MAX_SIZE + DAZE_KVM_PROTECTED_GATE_VIRTUAL_PREFIX_SIZE];
   size_t handler_size;
+  uint32_t rm_entry_epilogue;
   uint8_t idt_entry[8];
   uint8_t dos_handler[DAZE_KVM_PROTECTED_GATE_HANDLER_MAX_SIZE];
   size_t dos_handler_size;
   uint8_t dos_idt_entry[8];
   uint8_t default_dos_stub[DAZE_KVM_PROTECTED_GATE_DEFAULT_DOS_STUB_SIZE];
   size_t default_dos_stub_size;
+  uint8_t virtual_handler[DAZE_KVM_PROTECTED_GATE_VIRTUAL_HANDLER_SIZE];
+  uint8_t virtual_control[DAZE_KVM_PROTECTED_GATE_VIRTUAL_CONTROL_SIZE];
+  size_t virtual_handler_size;
 } DazeKvmProtectedGateArtifacts;
 
 typedef struct {
@@ -81,6 +91,10 @@ typedef struct {
 /* Pure artifact construction. Invalid input leaves output unchanged. */
 int daze_kvm_protected_gate_build(const DazeKvmProtectedGateLayout *layout,
                                   DazeKvmProtectedGateArtifacts *output);
+
+int daze_kvm_protected_gate_sync_virtual_interrupts(DazeKvmMachine *machine,
+                                                    const DazeKvmProtectedGateLayout *layout,
+                                                    int *enabled);
 
 /* The target descriptor's D/B bit selects an 86h or 8Eh gate. Invalid or non-executable
  * targets leave entry unchanged. */

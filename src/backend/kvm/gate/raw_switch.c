@@ -1,5 +1,6 @@
 #include "interrupt_vector.h"
 #include "raw_switch.h"
+#include "machine_access.h"
 
 #include "idt_gate.h"
 #include "kvm_range.h"
@@ -136,6 +137,7 @@ static int consume_boundary(DazeKvmMachine *machine, const DazeKvmRawSwitchGateL
   regs.rsp = result->request.bx;
   regs.rax = saved_eax;
   regs.rflags = result->request.flags;
+  daze_kvm_machine_debug_invalidate(machine);
   return ioctl(machine->vcpu, KVM_SET_SREGS, &sregs) == 0 &&
              ioctl(machine->vcpu, KVM_SET_REGS, &regs) == 0
            ? DAZE_KVM_RAW_SWITCH_GATE_OK
@@ -228,6 +230,7 @@ int daze_kvm_raw_switch_gate_return_to_protected(DazeKvmMachine *machine,
   sregs.idt.limit = gate->idt_limit;
   sregs.cs = protected_code_segment(layout->wrapper_selector, layout->protected_code_base);
   regs.rip = layout->wrapper_address - layout->protected_code_base;
+  daze_kvm_machine_debug_invalidate(machine);
   return ioctl(machine->vcpu, KVM_SET_SREGS, &sregs) == 0 &&
              ioctl(machine->vcpu, KVM_SET_REGS, &regs) == 0
            ? DAZE_KVM_RAW_SWITCH_GATE_OK

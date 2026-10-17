@@ -22,7 +22,7 @@ enum {
   k_protected_mailbox = k_protected_record + 0x40,
   k_state_save_handler = k_protected_mailbox + 0x40,
   k_raw_switch_handler = k_state_save_handler + 0x20,
-  k_gate_end = k_gate_base + 0x420,
+  k_gate_end = k_gate_base + 0x540,
   /* 0040h and 0048h belong to client and exception stacks. Private gates must avoid
    * them; the 0060h alias is 32-bit for the default DOS stub's far jump. */
   k_gate_code_selector = DAZE_SEL_GATE_CODE,
@@ -207,6 +207,8 @@ int daze_kvm_normal_transition_config_build(const DazeKvmNormalTransitionConfigI
     colliding_selector = k_gate_data_selector;
   else if (has_gdt_selector(&inventory, k_gate_alias_code_selector))
     colliding_selector = k_gate_alias_code_selector;
+  else if (has_gdt_selector(&inventory, DAZE_SEL_EXCEPTION_RETURN))
+    colliding_selector = DAZE_SEL_EXCEPTION_RETURN;
   if (colliding_selector != 0) {
     set_failure(failure, DAZE_KVM_NORMAL_TRANSITION_CONFIG_BAD_INPUT,
                 (DazeKvmGuestRange){colliding_selector, 0}, k_no_range);
@@ -220,7 +222,11 @@ int daze_kvm_normal_transition_config_build(const DazeKvmNormalTransitionConfigI
                                                   0xfffff, 0x92, 0x0c}) ||
       !add(&inventory, (DazeDpmiTransitionDescriptorAddition){DAZE_DPMI_TRANSITION_GDT,
                                                               k_gate_alias_code_selector,
-                                                              k_gate_base, 0xffff, 0x9a, 0x0c})) {
+                                                              k_gate_base, 0xffff, 0x9a, 0x0c}) ||
+      !add(&inventory, (DazeDpmiTransitionDescriptorAddition){
+                         DAZE_DPMI_TRANSITION_GDT, DAZE_SEL_EXCEPTION_RETURN,
+                         k_dpmi_exception_locked_stack_base,
+                         k_memory_size - k_dpmi_exception_locked_stack_base - 1, 0x9a, 0x04})) {
     set_failure(failure, DAZE_KVM_NORMAL_TRANSITION_CONFIG_BAD_INPUT, k_no_range, k_no_range);
     return 0;
   }
@@ -243,6 +249,9 @@ int daze_kvm_normal_transition_config_build(const DazeKvmNormalTransitionConfigI
     .exception_gate_vector = DAZE_INT_GP_FAULT,
     .exception_gate_type = 0x8e,
     .legacy_np_capture_address = k_gate_base + 0x400,
+    .virtual_handler_address = k_gate_base + 0x500,
+    .virtual_control_address = k_protected_record + DAZE_KVM_DPMI_RECORD_SIZE,
+    .rm_entry_address = k_dpmi_rm_entry_linear,
   };
   candidate.state_save_gate = (DazeKvmStateSaveGateLayout){k_idt_address, k_state_save_handler,
                                                            k_idt_limit, k_gate_code_selector};

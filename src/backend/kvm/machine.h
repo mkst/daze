@@ -14,14 +14,21 @@ typedef struct {
   /* Probed KVM_SYNC_REGS class mask (0 when unsupported: register access
    * stays on ioctls). Plain int: no <linux/kvm.h> needed here. */
   int sync_regs_mask;
+  int immediate_exit_supported;
+  uint64_t debug_breakpoint;
+  int debug_breakpoint_known, debug_io_exit;
+  int write_batch_installed;
+  uint16_t write_batch_handle, write_batch_credit;
 } DazeKvmMachine;
 
 /* EXEC checkpoint owns a complete RAM copy and KVM general/special registers.
+ * Saved bytes and CPU metadata must not be modified.
  * Construct with snapshot_take and release with snapshot_dispose; not a portable format. */
 typedef struct {
   void *guest_bytes;
   void *cpu_state;
   size_t guest_size;
+  int write_batch_installed;
   int valid;
 } DazeKvmMachineSnapshot;
 

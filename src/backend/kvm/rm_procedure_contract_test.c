@@ -17,6 +17,7 @@ static int run_case(int kind) {
   const int init = daze_kvm_machine_init(&m, 0x40000);
   if (init == DAZE_KVM_MACHINE_UNAVAILABLE) return 77;
   if (init != DAZE_KVM_MACHINE_OK) return 1;
+  if (kind == 26 || kind == 28 || kind == 30) m.sync_regs_mask = 0;
   uint8_t *guest = m.guest;
   DazeRunMetrics metrics = {.enabled = 1};
   if (kind & 1) m.run_metrics = &metrics;
@@ -49,7 +50,7 @@ static int run_case(int kind) {
                                   .ldt_used_count = sizeof(used),
                                   .ldt_first_index = 16,
                                   .rm_procedure_present = 1,
-                                  .rm_procedure_is_interrupt = kind == 1};
+                                  .rm_procedure_is_interrupt = kind == 1 || kind == 31};
   mediator.rm_procedure = (DazeDpmiRmProcedure){.target_cs = 0x400,
                                                 .target_ip = 0,
                                                 .frame_ss = 0x1800,
@@ -68,7 +69,11 @@ static int run_case(int kind) {
   daze_write_u16(frame + DAZE_DPMI_RM_GS, 0);
   const uint8_t target[] = {0xbb, 0x78, 0x56, 0xb9, 0xbc, 0x9a, 0xcb};
   memcpy(guest + 0x4000, target, sizeof(target));
-  if (kind == 1) guest[0x4006] = 0xcf;
+  if (kind == 1 || kind == 31) {
+    guest[0x4006] = 0xcf;
+    mediator.rm_procedure.procedure_sp = 0x2fa;
+    mediator.rm_procedure.stack_address = 0x182fa;
+  }
   if (kind == 2) guest[0x4000] = 0xf4;
   if (kind == 3) {
     const uint8_t io[] = {0xb0, 0xee, 0xe6, 0x77, 0xcb};
@@ -86,7 +91,7 @@ static int run_case(int kind) {
     const uint8_t io[] = {0xe4, 0x21, 0xe4, 0xa1, 0xe6, 0, 0xcb};
     memcpy(guest + 0x4000, io, sizeof(io));
   }
-  if (kind == 7) {
+  if (kind == 7 || kind == 32) {
     mediator.rm_procedure.parameter_bytes = 4;
     mediator.rm_procedure.procedure_sp -= 4;
     mediator.rm_procedure.stack_address -= 4;
@@ -100,6 +105,26 @@ static int run_case(int kind) {
   if (kind == 19) {
     const uint8_t loop[] = {0xe6, 0, 0xeb, 0xfc}; /* out 0,al; jmp short -4 */
     memcpy(guest + 0x4000, loop, sizeof(loop));
+  }
+  if (kind == 25 || kind == 26 || kind == 29 || kind == 30) {
+    const uint8_t image[] = {
+      0x66, 0xb8, 0x44, 0x33, 0x22, 0x11, /* mov eax,11223344h */
+      0x66, 0xbb, 0x55, 0x44, 0x33, 0x22, /* mov ebx,22334455h */
+      0x66, 0xb9, 0x66, 0x55, 0x44, 0x33, /* mov ecx,33445566h */
+      0x66, 0xba, 0x77, 0x66, 0x55, 0x44, /* mov edx,44556677h */
+      0x66, 0xbe, 0x88, 0x77, 0x66, 0x55, /* mov esi,55667788h */
+      0x66, 0xbf, 0x99, 0x88, 0x77, 0x66, /* mov edi,66778899h */
+      0x66, 0xbd, 0xaa, 0x99, 0x88, 0x77, /* mov ebp,778899aah */
+      0x66, 0x50,                         /* push eax */
+      0xb8, 0x00, 0x11, 0x8e, 0xc0,       /* mov ax,1100h; mov es,ax */
+      0xb8, 0x00, 0x12, 0x8e, 0xd8,       /* mov ax,1200h; mov ds,ax */
+      0xb8, 0x00, 0x13, 0x8e, 0xe0,       /* mov ax,1300h; mov fs,ax */
+      0xb8, 0x00, 0x14, 0x8e, 0xe8,       /* mov ax,1400h; mov gs,ax */
+      0x66, 0x58,                         /* pop eax */
+      0x68, 0xd7, 0x0e, 0x9d,             /* push 0ed7h; popf */
+      0xcb,                               /* retf */
+    };
+    memcpy(guest + 0x4000, image, sizeof(image));
   }
   if (kind >= 11 && kind < 18) {
     const uint8_t dos_gate[] = {0x50, 0xb0, 0x21, 0xe6, 0xf4, 0x83, 0xc4, 2, 0xcf};
@@ -153,6 +178,53 @@ static int run_case(int kind) {
   sr.gdt.base = 0x6000;
   sr.gdt.limit = 0x47;
   daze_dpmi_descriptor_encode(guest + 0x6028, 0x2000, 0xffff, 0x9a, 0);
+  if (kind == 27 || kind == 28) {
+    sr.cs.selector = 0x50;
+    sr.gdt.limit = 0x57;
+    daze_dpmi_descriptor_encode(guest + 0x6050, 0x2000, 0xffff, 0x9a, 0);
+    r.rax = 0x12345678;
+    r.rflags = 0x8d7;
+  }
+  if (kind >= 29) {
+    memcpy(guest + 0x3500, parked_code, sizeof(parked_code));
+    r.rip = 0x1500;
+    r.rax = 0x12345678;
+    r.rflags = 0x8d7;
+    sr.cs.selector = 0x50;
+    sr.gdt.limit = 0x5f;
+    sr.ss = (struct kvm_segment){.selector = 0x10,
+                                 .base = 0x18000,
+                                 .limit = 0xffff,
+                                 .type = 3,
+                                 .present = 1,
+                                 .s = 1,
+                                 .db = kind == 33};
+    sr.ds = sr.ss;
+    sr.es = sr.ss;
+    if (kind == 33) {
+      sr.ss.limit = sr.ds.limit = sr.es.limit = 0x1ffff;
+      r.rsp = r.rbp = 0x10100;
+    }
+    sr.fs = (struct kvm_segment){
+      .selector = 0x58, .limit = UINT32_MAX, .type = 3, .present = 1, .s = 1, .db = 1, .g = 1};
+    sr.gs = (struct kvm_segment){.unusable = 1};
+    daze_dpmi_descriptor_encode(guest + 0x6010, 0x18000, sr.ss.limit, 0x93, kind == 33 ? 4 : 0);
+    daze_dpmi_descriptor_encode(guest + 0x6050, 0x2000, 0xffff, 0x9b, 0);
+    daze_dpmi_descriptor_encode(guest + 0x6058, 0, UINT32_MAX, 0x93, 12);
+    if (kind == 34) {
+      const uint8_t fault[] = {0x0f, 0x0b}; /* ud2 */
+      memcpy(guest + 0x3504, fault, sizeof(fault));
+    }
+    if (kind == 35) guest[0x6012] ^= 1;
+    if (kind == 36) {
+      const uint8_t dpmi[] = {0xbb, 0, 0, 0xb9, 0, 0x10, 0xb8, 1, 5, 0xcd, 0x31, 0xcb};
+      const uint8_t gate[] = {0x50, 0xb0, 0x31, 0xe6, 0xf4, 0x83, 0xc4, 2, 0xcf};
+      memcpy(guest + 0x4000, dpmi, sizeof(dpmi));
+      memcpy(guest + 0x9000, gate, sizeof(gate));
+      daze_write_u16(guest + 0x31 * 4 + 2, 0x900);
+    }
+    daze_write_u32(guest + sr.ss.base + r.rsp - 4, 0xdabbad00);
+  }
   daze_write_u16(guest + 0x1810c, 0x1357);
   daze_write_u16(guest + 0x1810e, 0x2468);
   if (ioctl(m.vcpu, KVM_SET_SREGS, &sr) < 0 || ioctl(m.vcpu, KVM_SET_REGS, &r) < 0) fail = 1;
@@ -200,10 +272,13 @@ static int run_case(int kind) {
                                .files = &files,
                                .process_state = &dos,
                                .dpmi_entry_segment = 0x200,
-                               .protected_return_linear = kind == 23 ? 0x2504 : 0},
+                               .protected_return_linear = kind == 23   ? 0x2504
+                                                          : kind == 37 ? 0x3504
+                                                                       : 0},
     &successor);
   const int success = kind == 0 || kind == 1 || kind == 6 || kind == 7 || kind == 11 ||
-                      (kind >= 13 && kind <= 16) || kind == 23 || kind == 24;
+                      (kind >= 13 && kind <= 16) || kind == 23 || kind == 24 || kind == 25 ||
+                      kind == 26 || kind == 27 || kind == 28 || kind >= 29;
   if (kind == 2) {
     if (unsetenv("DAZE_KVM_RM_CRASH_DUMP") != 0 || fflush(stderr) != 0 ||
         dup2(saved_stderr, STDERR_FILENO) < 0)
@@ -225,13 +300,29 @@ static int run_case(int kind) {
   daze_kvm_machine_get_sregs(&m, &safter);
   fail |= status != success;
   if (success) {
-    fail |= successor.observation.kind !=
-              (kind == 23 ? DAZE_KVM_DPMI_ENTRY_EXIT_DEBUG : DAZE_KVM_DPMI_ENTRY_EXIT_HLT) ||
-            successor.cs != 0x28 || successor.cs_base != 0x2000 ||
-            successor.rip != (kind == 23 ? 0x504 : 0x505) || !(successor.cr0 & 1) ||
-            after.rbx != parked.rbx || after.rcx != parked.rcx || after.rsp != parked.rsp ||
-            safter.gdt.base != sr.gdt.base ||
-            memcmp(frame + DAZE_DPMI_RM_IP, before + DAZE_DPMI_RM_IP, 8) != 0;
+    const int debug = kind == 23 || kind == 37;
+    const uint32_t successor_ip = kind >= 29 ? 0x1505 : 0x505;
+    fail |=
+      (kind != 34 && successor.observation.kind !=
+                       (debug ? DAZE_KVM_DPMI_ENTRY_EXIT_DEBUG : DAZE_KVM_DPMI_ENTRY_EXIT_HLT)) ||
+      (kind == 34 && successor.observation.raw_exit_reason != KVM_EXIT_SHUTDOWN) ||
+      (kind != 34 && (successor.cs != sr.cs.selector || successor.cs_base != 0x2000 ||
+                      successor.rip != (debug ? successor_ip - 1 : successor_ip) ||
+                      !(successor.cr0 & 1) || after.rbx != parked.rbx || after.rcx != parked.rcx ||
+                      after.rsp != parked.rsp || safter.gdt.base != sr.gdt.base)) ||
+      memcmp(frame + DAZE_DPMI_RM_IP, before + DAZE_DPMI_RM_IP, 8) != 0;
+    if (kind >= 29 && kind != 34)
+      fail |= after.rax != parked.rax || after.rflags != parked.rflags || after.rdx != parked.rdx ||
+              after.rsi != parked.rsi || after.rdi != parked.rdi || after.rbp != parked.rbp ||
+              daze_read_u32(guest + sr.ss.base + parked.rsp - 4) != 0xdabbad00 ||
+              memcmp(frame + 12, before + 12, 4) != 0;
+    if (kind >= 29 && kind < 35 && m.run_metrics != NULL)
+      fail |= metrics.kvm_rm_procedure_bridged_calls != 1;
+    if (kind >= 35 && m.run_metrics != NULL) fail |= metrics.kvm_rm_procedure_bridged_calls != 0;
+    if (kind == 27 || kind == 28)
+      fail |= after.rax != parked.rax || after.rflags != parked.rflags || after.rdx != parked.rdx ||
+              after.rbp != parked.rbp || memcmp(&safter.ds, &sr.ds, sizeof(sr.ds)) != 0 ||
+              memcmp(&safter.ss, &sr.ss, sizeof(sr.ss)) != 0;
     if (kind == 0 || kind == 1 || kind == 7)
       fail |= (uint16_t)daze_read_u32(frame + DAZE_DPMI_RM_EBX) != (kind == 7 ? 0x1357 : 0x5678) ||
               (uint16_t)daze_read_u32(frame + DAZE_DPMI_RM_ECX) != (kind == 7 ? 0x2468 : 0x9abc);
@@ -248,6 +339,18 @@ static int run_case(int kind) {
     if (kind == 16)
       fail |= (uint16_t)daze_read_u32(frame + DAZE_DPMI_RM_EAX) != 0x8021 ||
               !(daze_read_u16(frame + DAZE_DPMI_RM_FLAGS) & 1);
+    if (kind == 25 || kind == 26 || kind == 29 || kind == 30) {
+      const unsigned offsets[] = {DAZE_DPMI_RM_EAX, DAZE_DPMI_RM_EBX, DAZE_DPMI_RM_ECX,
+                                  DAZE_DPMI_RM_EDX, DAZE_DPMI_RM_ESI, DAZE_DPMI_RM_EDI,
+                                  DAZE_DPMI_RM_EBP};
+      for (size_t i = 0; i < sizeof(offsets) / sizeof(offsets[0]); ++i)
+        fail |= daze_read_u32(frame + offsets[i]) != 0x11223344u + i * 0x11111111u;
+      fail |= daze_read_u16(frame + DAZE_DPMI_RM_FLAGS) != 0x0ed7 ||
+              daze_read_u16(frame + DAZE_DPMI_RM_ES) != 0x1100 ||
+              daze_read_u16(frame + DAZE_DPMI_RM_DS) != 0x1200 ||
+              daze_read_u16(frame + DAZE_DPMI_RM_FS) != 0x1300 ||
+              daze_read_u16(frame + DAZE_DPMI_RM_GS) != 0x1400;
+    }
     if (kind & 1)
       fail |= metrics.kvm_rm_procedure_calls != 1 || metrics.kvm_rm_procedure_run_calls == 0;
   } else {
@@ -257,6 +360,27 @@ static int run_case(int kind) {
   if (fail)
     fprintf(stderr, "RM case %d status=%d expected=%d successor=%d cs:ip=%04x:%x\n", kind, status,
             success, successor.observation.kind, successor.cs, successor.rip);
+  if (fail && kind >= 29)
+    fprintf(stderr,
+            "RM bridge exit=%u cs=%04x base=%llx ip=%llx ss=%04x base=%llx "
+            "sp=%llx flags=%llx cr0=%llx eax=%llx ebx=%llx ecx=%llx edx=%llx\n",
+            ((const struct kvm_run *)m.run)->exit_reason, safter.cs.selector,
+            (unsigned long long)safter.cs.base, (unsigned long long)after.rip, safter.ss.selector,
+            (unsigned long long)safter.ss.base, (unsigned long long)after.rsp,
+            (unsigned long long)after.rflags, (unsigned long long)safter.cr0,
+            (unsigned long long)after.rax, (unsigned long long)after.rbx,
+            (unsigned long long)after.rcx, (unsigned long long)after.rdx);
+  if (fail && (kind == 25 || kind == 26))
+    fprintf(stderr,
+            "RM return exit=%u eax=%08x ebx=%08x ecx=%08x edx=%08x esi=%08x edi=%08x "
+            "ebp=%08x flags=%04x es=%04x ds=%04x fs=%04x gs=%04x\n",
+            ((const struct kvm_run *)m.run)->exit_reason, daze_read_u32(frame + DAZE_DPMI_RM_EAX),
+            daze_read_u32(frame + DAZE_DPMI_RM_EBX), daze_read_u32(frame + DAZE_DPMI_RM_ECX),
+            daze_read_u32(frame + DAZE_DPMI_RM_EDX), daze_read_u32(frame + DAZE_DPMI_RM_ESI),
+            daze_read_u32(frame + DAZE_DPMI_RM_EDI), daze_read_u32(frame + DAZE_DPMI_RM_EBP),
+            daze_read_u16(frame + DAZE_DPMI_RM_FLAGS), daze_read_u16(frame + DAZE_DPMI_RM_ES),
+            daze_read_u16(frame + DAZE_DPMI_RM_DS), daze_read_u16(frame + DAZE_DPMI_RM_FS),
+            daze_read_u16(frame + DAZE_DPMI_RM_GS));
   if (kind == 24)
     fail |= metrics.kvm_rm_procedure_calls != 0 || metrics.kvm_rm_procedure_run_calls != 0;
   daze_dos_process_state_dispose(&dos);
@@ -264,7 +388,7 @@ static int run_case(int kind) {
   return fail;
 }
 int main(void) {
-  for (int kind = 0; kind < 25; ++kind) {
+  for (int kind = 0; kind < 38; ++kind) {
     int status = run_case(kind);
     if (status) return status;
   }

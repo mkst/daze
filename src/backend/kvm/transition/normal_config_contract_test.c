@@ -201,7 +201,7 @@ int main(void) {
     find_addition(&config, DAZE_DPMI_TRANSITION_GDT, 0x1078);
   const DazeDpmiTransitionDescriptorAddition *dynamic_ldt_data =
     find_addition(&config, DAZE_DPMI_TRANSITION_LDT, 0x1010);
-  if (config.addition_count != 12 || !inventory_unique(&config) || compat == NULL ||
+  if (config.addition_count != 13 || !inventory_unique(&config) || compat == NULL ||
       compat->base != 0x0500 || compat->limit != 7 || compat->access != 0x92 || code == NULL ||
       data == NULL || code->access != 0x9a || data->access != 0x92 || code->flags != 0x0c ||
       data->flags != 0x0c || dynamic == NULL || dynamic->base != 0x107f0 ||
@@ -219,6 +219,8 @@ int main(void) {
       config.protected_gate.default_dos_stub_address != 0xfde9c8 ||
       config.protected_gate.record_address != 0xfdea00 ||
       config.protected_gate.mailbox_address != 0xfdea40 ||
+      config.protected_gate.virtual_control_address != 0xfdea2c ||
+      config.protected_gate.virtual_handler_address != 0xfded00 ||
       config.state_save_gate.handler_address != 0xfdea80 ||
       config.raw_switch_gate.handler_address != 0xfdeaa0 ||
       config.raw_switch_gate.real_handler_address != 0x2300 ||
@@ -272,13 +274,19 @@ int main(void) {
     return 1;
   }
   invalid = normal_input();
+  invalid.handoff_ds = DAZE_SEL_EXCEPTION_RETURN;
+  if (daze_kvm_normal_transition_config_build(&invalid, &unchanged, NULL)) {
+    fprintf(stderr, "exception-return selector collision was accepted\n");
+    return 1;
+  }
+  invalid = normal_input();
   invalid.guest_size = k_memory_size - 1;
   if (daze_kvm_normal_transition_config_build(&invalid, &unchanged, NULL)) {
     fprintf(stderr, "non-normal process placement was accepted\n");
     return 1;
   }
   invalid = normal_input();
-  invalid.reserved_ranges = &(DazeKvmGuestRange){0xfde800, 0x420};
+  invalid.reserved_ranges = &(DazeKvmGuestRange){0xfded20, 0x20};
   invalid.reserved_range_count = 1;
   if (daze_kvm_normal_transition_config_build(&invalid, &unchanged, NULL)) {
     fprintf(stderr, "runner-reserved gate collision was accepted\n");

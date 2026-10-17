@@ -3,9 +3,11 @@
 
 #undef NDEBUG
 #include <assert.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -25,7 +27,12 @@ static void run(const char *const *arguments, int expected, const char *output,
     assert(chdir(directory) == 0);
     assert(dup2(fileno(out), STDOUT_FILENO) >= 0 && dup2(fileno(err), STDERR_FILENO) >= 0);
     assert(close(fileno(out)) == 0 && close(fileno(err)) == 0);
-    if (exhaust_fds) {
+    if (exhaust_fds < 0) {
+      /* Leave enough space for coverage counters while bounding guest output. */
+      const struct rlimit limit = {0x100000, 0x100000};
+      assert(setrlimit(RLIMIT_FSIZE, &limit) == 0 && signal(SIGXFSZ, SIG_IGN) != SIG_ERR);
+      assert(setenv("DAZE_BUFFERED_WRITES", "1", 1) == 0);
+    } else if (exhaust_fds) {
       /* Keep the descriptor budget independent of CTest's inherited streams. */
       for (int fd = 3; fd < 1024; ++fd)
         close(fd);
@@ -200,6 +207,16 @@ static void execution_cases(const char *backend) {
   run(nonzero, 37, "", "started=1 exit=37", "falling back", 0);
   struct stat info;
   assert(stat(tmp, &info) == 0 && S_ISDIR(info.st_mode) && rmdir(tmp) == 0);
+  const char *buffered[] = {runner, "--backend", mode, "--no-tmp", "BUFFER.EXE", NULL};
+  char buffered_path[256];
+  snprintf(buffered_path, sizeof(buffered_path), "%s/BUFFER.BIN", directory);
+  int buffered_fd = open(buffered_path, O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC, 0600);
+  assert(buffered_fd >= 0 && ftruncate(buffered_fd, 0x100000) == 0);
+  run(buffered, 3, "", "cannot flush DOS output", NULL, -1);
+  const char *buffered_failure[] = {runner, "--backend", mode, "--no-tmp", "BUFFERFAIL.EXE", NULL};
+  run(buffered_failure, 37, "", "cannot flush DOS output", NULL, -1);
+  assert(fstat(buffered_fd, &info) == 0 && info.st_size == 0x100000);
+  assert(unlink(buffered_path) == 0 && close(buffered_fd) == 0);
   if (strcmp(expected, "kvm") == 0) {
     const char *halt[] = {runner,    "--backend", mode,       "--no-tmp",
                           "--debug", "--metrics", "HALT.EXE", NULL};
@@ -242,6 +259,28 @@ int main(int argc, char **argv) {
     0xcd, 0x21,       /* int 0x21 */
   };
   const uint8_t halt[] = {0xf4}; /* hlt */
+  uint8_t buffered[144] = {
+    0x0e, 0x1f,       /* push cs; pop ds */
+    0xba, 0x40, 0,    /* mov dx,0040h */
+    0xb8, 0x01, 0x3d, /* mov ax,3d01h */
+    0xcd, 0x21,       /* int 21h */
+    0x89, 0xc3,       /* mov bx,ax */
+    0x31, 0xc9,       /* xor cx,cx */
+    0x31, 0xd2,       /* xor dx,dx */
+    0xb8, 0x02, 0x42, /* mov ax,4202h */
+    0xcd, 0x21,       /* int 21h */
+    0xba, 0x50, 0,    /* mov dx,0050h */
+    0xb9, 0x40, 0,    /* mov cx,0040h */
+    0xb4, 0x40,       /* mov ah,40h */
+    0xcd, 0x21,       /* int 21h */
+    0xb8, 0,    0x4c, /* mov ax,4c00h */
+    0xcd, 0x21,       /* int 21h */
+  };
+  memcpy(buffered + 64, "BUFFER.BIN", sizeof("BUFFER.BIN"));
+  memset(buffered + 80, 'x', 64);
+  write_guest("BUFFER.EXE", buffered, sizeof(buffered));
+  buffered[32] = 37;
+  write_guest("BUFFERFAIL.EXE", buffered, sizeof(buffered));
   write_guest("ZERO.EXE", zero, sizeof(zero));
   write_guest("EXIT.EXE", exit, sizeof(exit));
   write_guest("HALT.EXE", halt, sizeof(halt));
@@ -266,7 +305,8 @@ int main(int argc, char **argv) {
     setup_cases();
   else
     execution_cases(argv[2]);
-  const char *names[] = {"ZERO.EXE", "EXIT.EXE", "HALT.EXE", "BAD.EXE", "LARGE.EXE"};
+  const char *names[] = {"ZERO.EXE",  "EXIT.EXE",   "HALT.EXE",      "BAD.EXE",
+                         "LARGE.EXE", "BUFFER.EXE", "BUFFERFAIL.EXE"};
   for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
     char path[256];
     snprintf(path, sizeof(path), "%s/%s", directory, names[i]);

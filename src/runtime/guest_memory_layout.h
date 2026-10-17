@@ -22,6 +22,7 @@ enum {
   k_dos_dbcs_table_segment = 0x0600,
   k_dpmi_entry_segment = 0x0200,
   k_dos_int21_vector_segment = 0x0300,
+  k_dos_int21_vector_linear = k_dos_int21_vector_segment * 16,
   /* InDOS storage must remain clear of the INT 21h and IRET stubs. */
   k_dos_sda_offset = 0x001f,
   k_dos_indos_offset = 0x0020,
@@ -32,6 +33,16 @@ enum {
   k_dpmi_rm_target_linear = 0x2160,
   k_dpmi_rm_gate_linear = 0x2300,
   k_dpmi_rm_gate_segment = 0x0230,
+  k_dpmi_rm_return_bridge = 0x2400,
+  k_dpmi_rm_return_bridge_size = 0xb00,
+  k_dpmi_rm_entry_linear = 0x5000,
+  k_dpmi_rm_entry_reserved_linear = 0x4e00,
+  k_dpmi_rm_entry_size = 0x1200,
+  k_kvm_write_batch_code = 0x7400,
+  k_kvm_write_batch_control = 0x7800,
+  k_kvm_write_batch_data = 0x8000,
+  k_kvm_write_batch_capacity = 0x4000,
+  k_kvm_write_batch_size = 0x4c00,
   k_bios_config_table = 0x1f100,
   k_pm_reentry_wrapper = 0x2180,
   k_pm_reentry_state = 0x2200,
@@ -56,11 +67,17 @@ enum {
   k_dpmi_exception_locked_stack_base = k_memory_size - 0x30000,
   k_dpmi_exception_locked_stack_limit = 0x0fff,
   k_dpmi_exception_locked_stack_sp = 0x0ff0,
+  k_kvm_exception_return_linear = k_dpmi_ldt_address - 0x1200,
+  k_kvm_exception_return_size = 0x400,
+  k_kvm_exception_return_control = k_kvm_exception_return_linear + 0x300,
+  k_kvm_exception_delivery_linear = k_dpmi_ldt_address - 0x3000,
+  k_kvm_exception_delivery_control = k_kvm_exception_delivery_linear + 0x800,
+  k_kvm_exception_delivery_size = 0xa00,
   k_dpmi_linear_arena_limit = k_dpmi_exception_locked_stack_base,
   k_dos_psp_size = 256,
   k_dos_environment_max_size = 512,
   k_dos_dpmi_entry_stub_size = 3,
-  k_dos_vector_gate_size = 3,
+  k_dos_vector_gate_size = 12,
   k_dos_vector_gate_iret_offset = 0x10,
   k_dos_vector_gate_iret_size = 1,
   k_dos_dbcs_table_size = 2,
@@ -109,11 +126,16 @@ typedef enum {
   DAZE_GUEST_OWNER_DPMI_GDT,
   DAZE_GUEST_OWNER_DPMI_LDT,
   DAZE_GUEST_OWNER_DPMI_LOCKED_STACK,
+  DAZE_GUEST_OWNER_KVM_EXCEPTION_RETURN,
+  DAZE_GUEST_OWNER_KVM_EXCEPTION_DELIVERY,
   DAZE_GUEST_OWNER_DPMI_CLIENT_ARENA,
   DAZE_GUEST_OWNER_CONVENTIONAL_ALLOCATOR,
   DAZE_GUEST_OWNER_KVM_RUNNER_GATE_ARENA,
   DAZE_GUEST_OWNER_KVM_RUNNER_RECORD,
   DAZE_GUEST_OWNER_KVM_RUNNER_MAILBOX,
+  DAZE_GUEST_OWNER_KVM_RM_RETURN_BRIDGE,
+  DAZE_GUEST_OWNER_KVM_RM_ENTRY,
+  DAZE_GUEST_OWNER_KVM_WRITE_BATCH,
   DAZE_GUEST_OWNER_COUNT,
   DAZE_GUEST_OWNER_NONE = DAZE_GUEST_OWNER_COUNT,
 } DazeGuestOwner;
@@ -124,9 +146,9 @@ typedef struct {
   DazeGuestOwner owner;
 } DazeGuestRange;
 
-enum { DAZE_GUEST_LAYOUT_MAX_RANGES = 20 };
+enum { DAZE_GUEST_LAYOUT_MAX_RANGES = 22 };
 
-enum { DAZE_GUEST_LAYOUT_STABLE_COUNT = 10 };
+enum { DAZE_GUEST_LAYOUT_STABLE_COUNT = 15 };
 
 typedef struct {
   DazeGuestRange ranges[DAZE_GUEST_LAYOUT_MAX_RANGES];

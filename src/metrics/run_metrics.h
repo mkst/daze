@@ -16,6 +16,25 @@ enum { DAZE_RUN_METRICS_DPMI_FUNCTION_CAPACITY = 32 };
 enum { DAZE_RUN_METRICS_VIRTUAL_INTERRUPT_SITE_CAPACITY = 16 };
 enum { DAZE_RUN_METRICS_RM_REFLECT_VECTOR_CAPACITY = 16 };
 
+enum {
+  DAZE_RUN_METRICS_RM_DATE,
+  DAZE_RUN_METRICS_RM_TIME,
+  DAZE_RUN_METRICS_RM_OTHER,
+  DAZE_RUN_METRICS_RM_COST_COUNT,
+};
+
+typedef struct {
+  uint64_t calls;
+  uint64_t total_nanoseconds;
+  uint64_t setup_nanoseconds;
+  uint64_t reflect_nanoseconds;
+  uint64_t cleanup_nanoseconds;
+  uint64_t resume_nanoseconds;
+  uint64_t reflect_run_nanoseconds;
+  uint64_t resume_run_nanoseconds;
+  uint64_t service_nanoseconds;
+} DazeRunMetricsRmProcedureCost;
+
 typedef struct {
   uint16_t function;
   uint64_t calls;
@@ -72,6 +91,11 @@ typedef struct {
    * Its duration includes both KVM_RUN and guest execution between exits. */
   uint64_t kvm_port_run_calls;
   uint64_t kvm_port_run_nanoseconds;
+  uint64_t kvm_io_drain_calls;
+  uint64_t kvm_io_drain_nanoseconds;
+  uint64_t kvm_io_drain_failures;
+  uint64_t kvm_exception_guest_returns, kvm_exception_host_returns;
+  uint64_t kvm_exception_guest_deliveries, kvm_exception_host_deliveries;
   /* Register traffic served from the shared kvm_run sync area instead of
    * GET/SET ioctls (see machine_access.h). Zero when unsupported. */
   uint64_t kvm_regs_sync_get_calls;
@@ -93,18 +117,23 @@ typedef struct {
   uint64_t kvm_dpmi_mediator_capture_elisions;
   uint64_t kvm_dpmi_debug_update_calls;
   uint64_t kvm_dpmi_debug_update_nanoseconds;
+  uint64_t kvm_debug_update_elisions;
+  uint64_t kvm_guest_virtual_interrupt_calls[2];
+  uint64_t kvm_guest_descriptor_calls[5];
+  uint64_t kvm_guest_vector_queries;
   /* DPMI 0301h uses a real-mode callback detour with its own KVM_RUN. These
    * are separate from the protected-mode DPMI entry helpers above. */
   uint64_t kvm_rm_procedure_calls;
+  uint64_t kvm_rm_procedure_native_calls;
+  uint64_t kvm_guest_write_calls, kvm_guest_write_bytes, kvm_guest_write_drains;
+  uint64_t kvm_rm_procedure_bridged_calls;
   uint64_t kvm_rm_procedure_nanoseconds;
   uint64_t kvm_rm_procedure_run_calls;
   uint64_t kvm_rm_procedure_run_nanoseconds;
   uint64_t kvm_rm_procedure_setup_nanoseconds;
   uint64_t kvm_rm_procedure_setup_parked_capture_nanoseconds;
   uint64_t kvm_rm_procedure_setup_retire_nanoseconds;
-  uint64_t kvm_rm_procedure_setup_post_pio_capture_nanoseconds;
   uint64_t kvm_rm_procedure_setup_transition_nanoseconds;
-  uint64_t kvm_rm_procedure_setup_debug_arm_nanoseconds;
   uint64_t kvm_rm_procedure_reflect_nanoseconds;
   uint64_t kvm_rm_procedure_reflect_runner_calls;
   uint64_t kvm_rm_procedure_reflect_runner_nanoseconds;
@@ -116,6 +145,7 @@ typedef struct {
   uint64_t kvm_rm_procedure_resume_nanoseconds;
   uint64_t kvm_rm_procedure_resume_run_nanoseconds;
   uint64_t kvm_rm_procedure_resume_capture_nanoseconds;
+  DazeRunMetricsRmProcedureCost kvm_rm_procedure_costs[DAZE_RUN_METRICS_RM_COST_COUNT];
   uint64_t kvm_dpmi_mediator_calls;
   uint64_t kvm_dpmi_mediator_nanoseconds;
   DazeRunMetricsDpmiFunction kvm_dpmi_functions[DAZE_RUN_METRICS_DPMI_FUNCTION_CAPACITY];

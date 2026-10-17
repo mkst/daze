@@ -41,9 +41,8 @@ typedef struct {
 int daze_kvm_runner_gate_frame_capture(DazeKvmMachine *machine, uint8_t vector,
                                        DazeKvmRunnerGateFrame *frame);
 
-/* Apply the canonical 16-byte broker reply to a captured frame.  The gate
- * discards its saved AX and IRETs; this helper supplies the reply registers
- * and patches only the interrupt frame's flags word. */
+/* Patch saved AX and FLAGS. Gates with POP AX restore AX in guest code;
+ * other reply registers and older gates use host register installs. */
 int daze_kvm_runner_gate_frame_reply(DazeKvmMachine *machine, const DazeKvmRunnerGateFrame *frame,
                                      const uint8_t reply[DAZE_KVM_RUNNER_GATE_REPLY_SIZE]);
 /* A restored parent snapshot was parked at the runner gate's OUT 0xf4. KVM

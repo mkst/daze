@@ -2,8 +2,10 @@
 
 #include "kvm_bytes.h"
 #include "mediator.h"
+#include "machine_access.h"
 #include "protected.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -916,7 +918,7 @@ static int run_retire_mediator_out_contract(void) {
   return fail;
 }
 
-static int run_retire_mediator_out_observe_case(int use_sync) {
+static int run_retire_mediator_out_observe_case(int use_sync, int coalesce) {
   DazeKvmMachine machine;
   DazeKvmProtectedGateArtifacts artifacts;
   uint32_t successor_linear;
@@ -940,15 +942,31 @@ static int run_retire_mediator_out_observe_case(int use_sync) {
   DazeKvmDpmiEntryResult retired;
   const int status =
     daze_kvm_dpmi_entry_retire_mediator_out_observe(&machine, parked.cs_base, parked.rip, &retired);
-  /* The software retire advances RIP past the validated OUT without running
-   * the guest, so there is no exit to observe: pin the retired registers,
-   * the absence of execution, and the absence of capture instead. */
   struct kvm_regs after_regs = {0};
   struct kvm_sregs after_sregs = {0};
+  const int queued = (machine.sync_regs_mask & KVM_SYNC_X86_REGS) != 0;
+  const int prepared =
+    status == DAZE_KVM_DPMI_ENTRY_OK && ioctl(machine.vcpu, KVM_GET_REGS, &after_regs) == 0 &&
+    after_regs.rip == (uint64_t)parked.rip + (queued ? 0 : 2) &&
+    (!queued || (((struct kvm_run *)machine.run)->kvm_dirty_regs & KVM_SYNC_X86_REGS));
+  const int queued_ok = !queued || memcmp(&((struct kvm_run *)machine.run)->s.regs.regs,
+                                          &expected_regs, sizeof(expected_regs)) == 0;
+  if (coalesce) {
+    expected_regs.rip += 0x20;
+    if (daze_kvm_machine_set_regs(&machine, &expected_regs) != DAZE_KVM_MACHINE_OK) {
+      daze_kvm_machine_destroy(&machine);
+      return 1;
+    }
+  }
+  /* immediate_exit completes pending I/O without executing its successor. */
+  ((struct kvm_run *)machine.run)->immediate_exit = 1;
+  const int completion = ioctl(machine.vcpu, KVM_RUN, 0);
+  const int completion_errno = errno;
+  ((struct kvm_run *)machine.run)->immediate_exit = 0;
   const int read_ok = ioctl(machine.vcpu, KVM_GET_REGS, &after_regs) == 0 &&
                       ioctl(machine.vcpu, KVM_GET_SREGS, &after_sregs) == 0;
   const int ok =
-    status == DAZE_KVM_DPMI_ENTRY_OK && read_ok && after_regs.rip == (uint64_t)parked.rip + 2 &&
+    prepared && queued_ok && completion == -1 && completion_errno == EINTR && read_ok &&
     memcmp(&after_regs, &expected_regs, sizeof(after_regs)) == 0 &&
     memcmp(&after_sregs, &expected_sregs, sizeof(after_sregs)) == 0 &&
     metrics.kvm_dpmi_run_calls[DAZE_RUN_METRICS_DPMI_RUN_CONTINUE_TO_LINEAR] == 0 &&
@@ -956,8 +974,13 @@ static int run_retire_mediator_out_observe_case(int use_sync) {
   if (!ok)
     fprintf(
       stderr,
-      "retire observe contract: FAIL status=%d rip=%llx parked=%x runs=%llu captures=%llu\n",
-      status, read_ok ? (unsigned long long)after_regs.rip : 0, parked.rip,
+      "retire observe contract: FAIL status=%d prepared=%d queued=%d coalesce=%d "
+      "completion=%d errno=%d raw=%u rip=%llx expected=%llx cs=%04x cr0=%llx "
+      "runs=%llu captures=%llu\n",
+      status, prepared, queued, coalesce, completion, completion_errno,
+      ((struct kvm_run *)machine.run)->exit_reason,
+      read_ok ? (unsigned long long)after_regs.rip : 0, (unsigned long long)expected_regs.rip,
+      after_sregs.cs.selector, (unsigned long long)after_sregs.cr0,
       (unsigned long long)metrics.kvm_dpmi_run_calls[DAZE_RUN_METRICS_DPMI_RUN_CONTINUE_TO_LINEAR],
       (unsigned long long)
         metrics.kvm_dpmi_state_capture_calls[DAZE_RUN_METRICS_DPMI_CAPTURE_CONTINUE_TO_LINEAR]);
@@ -975,7 +998,7 @@ static int run_retire_mediator_out_observe_case(int use_sync) {
     &machine, parked.cs_base, parked.rip, &rejected);
   const int rejected_ok = rejected_status == DAZE_KVM_DPMI_ENTRY_INVALID && read_ok &&
                           ioctl(machine.vcpu, KVM_GET_REGS, &after_regs) == 0 &&
-                          after_regs.rip == (uint64_t)parked.rip + 2;
+                          after_regs.rip == expected_regs.rip;
   if (!rejected_ok)
     fprintf(stderr, "retire observe contract: FAIL byte mismatch (status=%d rip=%llx parked=%x)\n",
             rejected_status, (unsigned long long)after_regs.rip, parked.rip);
@@ -986,8 +1009,10 @@ static int run_retire_mediator_out_observe_case(int use_sync) {
 }
 
 static int run_retire_mediator_out_observe_contract(void) {
-  const int sync = run_retire_mediator_out_observe_case(1);
-  return sync != 0 ? sync : run_retire_mediator_out_observe_case(0);
+  const int sync = run_retire_mediator_out_observe_case(1, 0);
+  if (sync != 0) return sync;
+  const int coalesce = run_retire_mediator_out_observe_case(1, 1);
+  return coalesce != 0 ? coalesce : run_retire_mediator_out_observe_case(0, 0);
 }
 #endif
 

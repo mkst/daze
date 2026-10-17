@@ -179,12 +179,39 @@ static void reporting(void) {
   run.kvm_gate_frame_capture_calls = 1;
   run.kvm_gate_frame_capture_nanoseconds = 1000000;
   run.kvm_dpmi_debug_update_calls = 1;
+  run.kvm_debug_update_elisions = 2;
   run.kvm_dpmi_debug_update_nanoseconds = 1000000;
   capture(1, NULL, &run, NULL);
   has("kvm-gate-frame capture=1/1.000ms/1000.0us reply=0/0.000ms/0.0us");
   has("state-capture=0/0.000ms/0.0us");
   has("debug-update=1/1.000ms/1000.0us mediator=0/0.000ms/0.0us");
+  has("metrics: kvm-debug-update-elisions=2");
   lacks("kvm-rm-procedure total");
+  lacks("kvm-io-drain=");
+  lacks("kvm-exception-return");
+  lacks("kvm-exception-delivery");
+  run.kvm_exception_guest_deliveries = 7;
+  run.kvm_exception_host_deliveries = 2;
+  capture(1, NULL, &run, NULL);
+  has("kvm-exception-delivery guest=7 host=2");
+  run.kvm_exception_guest_deliveries = 0;
+  capture(1, NULL, &run, NULL);
+  has("kvm-exception-delivery guest=0 host=2");
+  run.kvm_exception_guest_deliveries = run.kvm_exception_host_deliveries = 0;
+  run.kvm_exception_guest_returns = 7;
+  run.kvm_exception_host_returns = 2;
+  capture(1, NULL, &run, NULL);
+  has("kvm-exception-return guest=7 host=2");
+  run.kvm_exception_guest_returns = 0;
+  capture(1, NULL, &run, NULL);
+  has("kvm-exception-return guest=0 host=2");
+  run.kvm_exception_guest_returns = run.kvm_exception_host_returns = 0;
+  run.kvm_io_drain_calls = 3;
+  run.kvm_io_drain_nanoseconds = 2000000;
+  run.kvm_io_drain_failures = 1;
+  capture(1, NULL, &run, NULL);
+  has("kvm-io-drain=3 time=2.000ms failures=1 (completion only; no guest execution)");
+  run.kvm_io_drain_calls = 0;
   run.kvm_gate_frame_capture_calls = 0;
   run.kvm_gate_frame_capture_nanoseconds = 0;
   run.kvm_gate_frame_reply_calls = 1;
@@ -223,6 +250,7 @@ static void reporting(void) {
   run.kvm_dpmi_function_overflow_calls = 4;
   run.kvm_virtual_interrupt_site_overflow_calls = 5;
   run.kvm_rm_procedure_calls = 1;
+  run.kvm_rm_procedure_bridged_calls = 1;
   run.kvm_rm_procedure_nanoseconds = 10000000;
   run.kvm_rm_procedure_setup_nanoseconds = 6000000;
   run.kvm_rm_procedure_setup_parked_capture_nanoseconds = 1000000;
@@ -231,15 +259,48 @@ static void reporting(void) {
   run.kvm_rm_procedure_reflect_nanoseconds = 4000000;
   run.kvm_rm_procedure_reflect_runner_calls = 1;
   run.kvm_rm_procedure_reflect_runner_nanoseconds = 1000000;
+  run.kvm_rm_procedure_costs[DAZE_RUN_METRICS_RM_DATE] =
+    (DazeRunMetricsRmProcedureCost){.calls = 2,
+                                    .total_nanoseconds = 10000000,
+                                    .setup_nanoseconds = 1000000,
+                                    .reflect_nanoseconds = 6000000,
+                                    .cleanup_nanoseconds = 1000000,
+                                    .resume_nanoseconds = 2000000,
+                                    .reflect_run_nanoseconds = 4000000,
+                                    .resume_run_nanoseconds = 1500000,
+                                    .service_nanoseconds = 500000};
   capture(1, NULL, &run, NULL);
+  has("kvm-rm-procedure-cost date-2ah calls=2 total=10.000ms average=5000.0us "
+      "setup=1.000ms reflect=6.000ms cleanup=1.000ms resume=2.000ms "
+      "reflect-KVM_RUN=4.000ms resume-KVM_RUN=1.500ms dos-service=0.500ms");
+  lacks("kvm-rm-procedure-cost time-2ch");
+  lacks("kvm-guest-virtual-interrupts");
   has("kvm-rm-procedure total=1/10.000ms/10000.0us KVM_RUN=0/0.000ms/0.0us");
-  has("debug-arm=0.000ms other=5.000ms");
+  has("kvm-rm-procedure-bridged=1 (reflect includes protected execution to next exit)");
+  lacks("kvm-guest-writes=");
+  run.kvm_guest_write_calls = 7;
+  run.kvm_guest_write_bytes = 99;
+  run.kvm_guest_write_drains = 2;
+  run.kvm_rm_procedure_native_calls = 3;
+  capture(1, NULL, &run, NULL);
+  has("kvm-guest-writes=7/99B drains=2\n");
+  has("kvm-rm-procedure-native=3 (host detour timings may include multiple guest callbacks)");
+  has("transition=0.000ms other=5.000ms");
+  lacks("debug-arm=");
   has("kvm-rm-procedure-resume KVM_RUN=0.000ms capture=1.000ms other=2.000ms");
   has("kvm-rm-procedure-reflect KVM_RUN=0.000ms runner-service=1/1.000ms other=3.000ms");
   lacks("kvm-rm-procedure-reflect-vectors");
   has("kvm-dpmi-functions 0501h=2/3.000ms overflow=4\n");
   has("kvm-virtual-interrupt-sites 0900h@0028:1234=3 overflow=5\n");
   run.kvm_rm_procedure_run_calls = 1;
+  run.kvm_guest_virtual_interrupt_calls[0] = 3;
+  run.kvm_guest_virtual_interrupt_calls[1] = 4;
+  run.kvm_guest_descriptor_calls[0] = 5;
+  run.kvm_guest_descriptor_calls[1] = 6;
+  run.kvm_guest_descriptor_calls[2] = 7;
+  run.kvm_guest_descriptor_calls[3] = 9;
+  run.kvm_guest_descriptor_calls[4] = 10;
+  run.kvm_guest_vector_queries = 8;
   run.kvm_rm_procedure_run_nanoseconds = 2000000;
   run.kvm_rm_procedure_setup_nanoseconds = 500000;
   run.kvm_rm_procedure_resume_nanoseconds = 500000;
@@ -248,7 +309,30 @@ static void reporting(void) {
   run.kvm_rm_procedure_reflect_vectors[0] = (DazeRunMetricsRmReflectVector){0x21, 2, 3000000};
   capture(1, NULL, &run, NULL);
   has("KVM_RUN=1/2.000ms/2000.0us");
-  has("debug-arm=0.000ms other=0.000ms");
+  has("kvm-guest-virtual-interrupts 0900h=3 0901h=4");
+  has("kvm-guest-descriptors 0006h=10 0007h=5 0008h=6 0009h=7 000ch=9");
+  has("kvm-guest-vector-queries 0204h=8");
+  run.kvm_guest_vector_queries = 0;
+  run.kvm_guest_descriptor_calls[0] = 0;
+  capture(1, NULL, &run, NULL);
+  has("kvm-guest-descriptors 0006h=10 0007h=0 0008h=6 0009h=7");
+  lacks("kvm-guest-vector-queries");
+  run.kvm_guest_descriptor_calls[1] = 0;
+  capture(1, NULL, &run, NULL);
+  has("kvm-guest-descriptors 0006h=10 0007h=0 0008h=0 0009h=7");
+  run.kvm_guest_descriptor_calls[2] = 0;
+  capture(1, NULL, &run, NULL);
+  has("kvm-guest-descriptors 0006h=10 0007h=0 0008h=0 0009h=0 000ch=9");
+  run.kvm_guest_descriptor_calls[3] = 0;
+  capture(1, NULL, &run, NULL);
+  has("kvm-guest-descriptors 0006h=10 0007h=0 0008h=0 0009h=0 000ch=0");
+  run.kvm_guest_descriptor_calls[4] = 0;
+  capture(1, NULL, &run, NULL);
+  lacks("kvm-guest-descriptors");
+  run.kvm_guest_virtual_interrupt_calls[0] = 0;
+  capture(1, NULL, &run, NULL);
+  has("kvm-guest-virtual-interrupts 0900h=0 0901h=4");
+  has("transition=0.000ms other=0.000ms");
   has("kvm-rm-procedure-resume KVM_RUN=0.000ms capture=1.000ms other=0.000ms");
   has("kvm-rm-procedure-reflect KVM_RUN=2.000ms runner-service=1/1.000ms other=0.000ms");
   has("kvm-rm-procedure-reflect-vectors 21h=2/3.000ms\n");

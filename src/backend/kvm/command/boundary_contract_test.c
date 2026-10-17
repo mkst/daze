@@ -14,6 +14,10 @@ static DazeKvmDpmiEntryResult boundary(uint16_t port, uint8_t value) {
 
 int main(void) {
   DazeKvmDpmiEntryResult other = {0};
+  const DazeKvmDpmiEntryResult shutdown = {.cs = 0xf000,
+                                           .rip = 0xfff0,
+                                           .rflags = 2,
+                                           .observation = {.kind = DAZE_KVM_DPMI_ENTRY_EXIT_OTHER}};
   const DazeKvmDpmiEntryResult mediator = boundary(0xf4, 0x31);
   const DazeKvmDpmiEntryResult state = boundary(0xf4, 0x17);
   const DazeKvmDpmiEntryResult raw = boundary(0xf4, 0x18);
@@ -30,5 +34,6 @@ int main(void) {
            DAZE_KVM_COMMAND_BOUNDARY_UNSUPPORTED ||
          daze_kvm_command_boundary_classify(&unknown) != DAZE_KVM_COMMAND_BOUNDARY_UNSUPPORTED ||
          daze_kvm_command_boundary_classify(&wrong_port) != DAZE_KVM_COMMAND_BOUNDARY_UNSUPPORTED ||
+         daze_kvm_command_boundary_classify(&shutdown) != DAZE_KVM_COMMAND_BOUNDARY_OTHER ||
          daze_kvm_command_boundary_classify(&other) != DAZE_KVM_COMMAND_BOUNDARY_OTHER;
 }

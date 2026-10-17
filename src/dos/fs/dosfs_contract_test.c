@@ -200,8 +200,9 @@ static int handle_rejections_contract(void) {
     daze_dosfs_handles_adopt(NULL, source_fd, &handle) == DAZE_DOSFS_INVALID_PATH &&
     daze_dosfs_handles_adopt(&handles, -1, &handle) == DAZE_DOSFS_INVALID_PATH &&
     daze_dosfs_handles_adopt(&handles, source_fd, NULL) == DAZE_DOSFS_INVALID_PATH &&
-    handle == 0xbeef && daze_dosfs_handles_get(NULL, 0, &host_errno) == DAZE_DOSFS_INVALID_PATH &&
-    daze_dosfs_handles_get(&handles, 0, NULL) == DAZE_DOSFS_INVALID_PATH &&
+    handle == 0xbeef &&
+    daze_dosfs_handles_flush_and_get(NULL, 0, &host_errno) == DAZE_DOSFS_INVALID_PATH &&
+    daze_dosfs_handles_flush_and_get(&handles, 0, NULL) == DAZE_DOSFS_INVALID_PATH &&
     daze_dosfs_handles_close(NULL, 0, &host_errno) == DAZE_DOSFS_INVALID_PATH &&
     daze_dosfs_handles_close(&handles, DAZE_DOSFS_MAX_HANDLES, &host_errno) ==
       DAZE_DOSFS_INVALID_PATH &&
@@ -218,7 +219,8 @@ static int handle_rejections_contract(void) {
     daze_dosfs_handles_force_duplicate(&handles, 5, DAZE_DOSFS_MAX_HANDLES, &host_errno) ==
       DAZE_DOSFS_INVALID_PATH &&
     daze_dosfs_handles_force_duplicate(&handles, 5, 5, &host_errno) == DAZE_DOSFS_OK &&
-    daze_dosfs_handles_get(&handles, 5, &table_fd) == DAZE_DOSFS_OK && table_fd == source_fd;
+    daze_dosfs_handles_flush_and_get(&handles, 5, &table_fd) == DAZE_DOSFS_OK &&
+    table_fd == source_fd;
 
   DazeDosfsHandles occupied_child;
   daze_dosfs_handles_init(&occupied_child);
@@ -774,10 +776,12 @@ int main(void) {
   uint16_t dos_handle = 0;
   int table_fd = -1;
   if (guest_fd < 0 || daze_dosfs_handles_adopt(&handles, guest_fd, &dos_handle) != DAZE_DOSFS_OK ||
-      dos_handle != 5 || daze_dosfs_handles_get(&handles, dos_handle, &table_fd) != DAZE_DOSFS_OK ||
+      dos_handle != 5 ||
+      daze_dosfs_handles_flush_and_get(&handles, dos_handle, &table_fd) != DAZE_DOSFS_OK ||
       table_fd != guest_fd ||
       daze_dosfs_handles_close(&handles, dos_handle, &host_errno) != DAZE_DOSFS_OK ||
-      daze_dosfs_handles_get(&handles, dos_handle, &table_fd) != DAZE_DOSFS_INVALID_PATH) {
+      daze_dosfs_handles_flush_and_get(&handles, dos_handle, &table_fd) !=
+        DAZE_DOSFS_INVALID_PATH) {
     fprintf(stderr, "DOS handle-table ownership mismatch\n");
     pass = 0;
   }
@@ -789,11 +793,11 @@ int main(void) {
       daze_dosfs_handles_duplicate(&handles, dos_handle, &duplicate_handle, &host_errno) !=
         DAZE_DOSFS_OK ||
       duplicate_handle == dos_handle ||
-      daze_dosfs_handles_get(&handles, duplicate_handle, &table_fd) != DAZE_DOSFS_OK ||
+      daze_dosfs_handles_flush_and_get(&handles, duplicate_handle, &table_fd) != DAZE_DOSFS_OK ||
       read(guest_fd, &first_byte, 1) != 1 || read(table_fd, &second_byte, 1) != 1 ||
       first_byte != 'o' || second_byte != 'k' ||
       daze_dosfs_handles_close(&handles, dos_handle, &host_errno) != DAZE_DOSFS_OK ||
-      daze_dosfs_handles_get(&handles, duplicate_handle, &table_fd) != DAZE_DOSFS_OK ||
+      daze_dosfs_handles_flush_and_get(&handles, duplicate_handle, &table_fd) != DAZE_DOSFS_OK ||
       daze_dosfs_handles_close(&handles, duplicate_handle, &host_errno) != DAZE_DOSFS_OK ||
       daze_dosfs_handles_duplicate(&handles, dos_handle, &duplicate_handle, &host_errno) !=
         DAZE_DOSFS_INVALID_PATH) {
@@ -806,9 +810,9 @@ int main(void) {
   int inherited_fd = -1;
   int parent_stdout = -1;
   if (guest_fd < 0 || daze_dosfs_handles_adopt(&handles, guest_fd, &dos_handle) != DAZE_DOSFS_OK ||
-      daze_dosfs_handles_get(&handles, 1, &parent_stdout) != DAZE_DOSFS_OK ||
+      daze_dosfs_handles_flush_and_get(&handles, 1, &parent_stdout) != DAZE_DOSFS_OK ||
       daze_dosfs_handles_inherit(&handles, &inherited, &host_errno) != DAZE_DOSFS_OK ||
-      daze_dosfs_handles_get(&inherited, dos_handle, &inherited_fd) != DAZE_DOSFS_OK ||
+      daze_dosfs_handles_flush_and_get(&inherited, dos_handle, &inherited_fd) != DAZE_DOSFS_OK ||
       inherited_fd == guest_fd || read(inherited_fd, &first_byte, 1) != 1 ||
       read(guest_fd, &second_byte, 1) != 1 || first_byte != 'o' || second_byte != 'k' ||
       daze_dosfs_handles_close(&inherited, 1, &host_errno) != DAZE_DOSFS_OK ||
@@ -835,9 +839,9 @@ int main(void) {
   guest_fd = open(source_path, O_RDONLY | O_CLOEXEC);
   int replaced_fd = -1;
   if (guest_fd < 0 || daze_dosfs_handles_adopt(&handles, guest_fd, &dos_handle) != DAZE_DOSFS_OK ||
-      daze_dosfs_handles_get(&handles, 2, &replaced_fd) != DAZE_DOSFS_OK ||
+      daze_dosfs_handles_flush_and_get(&handles, 2, &replaced_fd) != DAZE_DOSFS_OK ||
       daze_dosfs_handles_force_duplicate(&handles, dos_handle, 2, &host_errno) != DAZE_DOSFS_OK ||
-      daze_dosfs_handles_get(&handles, 2, &table_fd) != DAZE_DOSFS_OK ||
+      daze_dosfs_handles_flush_and_get(&handles, 2, &table_fd) != DAZE_DOSFS_OK ||
       fcntl(replaced_fd, F_GETFD) != -1 || errno != EBADF || read(guest_fd, &first_byte, 1) != 1 ||
       read(table_fd, &second_byte, 1) != 1 || first_byte != 'o' || second_byte != 'k' ||
       daze_dosfs_handles_close(&handles, dos_handle, &host_errno) != DAZE_DOSFS_OK ||

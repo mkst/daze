@@ -196,6 +196,18 @@ void daze_metrics_report_run(const DazeRunMetrics *metrics) {
                 : (double)metrics->kvm_gate_frame_reply_nanoseconds /
                     metrics->kvm_gate_frame_reply_calls / 1000.0);
     }
+    if (metrics->kvm_exception_guest_deliveries || metrics->kvm_exception_host_deliveries)
+      fprintf(stderr, "metrics: kvm-exception-delivery guest=%" PRIu64 " host=%" PRIu64 "\n",
+              metrics->kvm_exception_guest_deliveries, metrics->kvm_exception_host_deliveries);
+    if (metrics->kvm_exception_guest_returns || metrics->kvm_exception_host_returns)
+      fprintf(stderr, "metrics: kvm-exception-return guest=%" PRIu64 " host=%" PRIu64 "\n",
+              metrics->kvm_exception_guest_returns, metrics->kvm_exception_host_returns);
+    if (metrics->kvm_io_drain_calls != 0)
+      fprintf(stderr,
+              "metrics: kvm-io-drain=%" PRIu64 " time=%.3fms failures=%" PRIu64
+              " (completion only; no guest execution)\n",
+              metrics->kvm_io_drain_calls, (double)metrics->kvm_io_drain_nanoseconds / 1000000.0,
+              metrics->kvm_io_drain_failures);
     static const char *const run_names[DAZE_RUN_METRICS_DPMI_RUN_COUNT] = {
       "entry", "continue-once", "continue-observe", "continue-to-linear"};
     static const char *const exit_names[DAZE_RUN_METRICS_KVM_EXIT_COUNT] = {"debug", "io", "hlt",
@@ -261,13 +273,34 @@ void daze_metrics_report_run(const DazeRunMetrics *metrics) {
                 ? 0.0
                 : (double)metrics->kvm_dpmi_mediator_nanoseconds /
                     metrics->kvm_dpmi_mediator_calls / 1000.0);
+      if (metrics->kvm_debug_update_elisions != 0)
+        fprintf(stderr, "metrics: kvm-debug-update-elisions=%" PRIu64 "\n",
+                metrics->kvm_debug_update_elisions);
       if (metrics->kvm_rm_procedure_calls != 0) {
+        static const char *const cost_names[DAZE_RUN_METRICS_RM_COST_COUNT] = {"date-2ah",
+                                                                               "time-2ch", "other"};
+        for (size_t kind = 0; kind < DAZE_RUN_METRICS_RM_COST_COUNT; ++kind) {
+          const DazeRunMetricsRmProcedureCost *cost = &metrics->kvm_rm_procedure_costs[kind];
+          if (cost->calls == 0) continue;
+          fprintf(stderr,
+                  "metrics: kvm-rm-procedure-cost %s calls=%" PRIu64
+                  " total=%.3fms average=%.1fus setup=%.3fms reflect=%.3fms cleanup=%.3fms"
+                  " resume=%.3fms reflect-KVM_RUN=%.3fms resume-KVM_RUN=%.3fms"
+                  " dos-service=%.3fms\n",
+                  cost_names[kind], cost->calls, (double)cost->total_nanoseconds / 1000000.0,
+                  (double)cost->total_nanoseconds / cost->calls / 1000.0,
+                  (double)cost->setup_nanoseconds / 1000000.0,
+                  (double)cost->reflect_nanoseconds / 1000000.0,
+                  (double)cost->cleanup_nanoseconds / 1000000.0,
+                  (double)cost->resume_nanoseconds / 1000000.0,
+                  (double)cost->reflect_run_nanoseconds / 1000000.0,
+                  (double)cost->resume_run_nanoseconds / 1000000.0,
+                  (double)cost->service_nanoseconds / 1000000.0);
+        }
         const uint64_t setup_accounted =
           metrics->kvm_rm_procedure_setup_parked_capture_nanoseconds +
           metrics->kvm_rm_procedure_setup_retire_nanoseconds +
-          metrics->kvm_rm_procedure_setup_post_pio_capture_nanoseconds +
-          metrics->kvm_rm_procedure_setup_transition_nanoseconds +
-          metrics->kvm_rm_procedure_setup_debug_arm_nanoseconds;
+          metrics->kvm_rm_procedure_setup_transition_nanoseconds;
         const uint64_t setup_other =
           metrics->kvm_rm_procedure_setup_nanoseconds > setup_accounted
             ? metrics->kvm_rm_procedure_setup_nanoseconds - setup_accounted
@@ -292,14 +325,26 @@ void daze_metrics_report_run(const DazeRunMetrics *metrics) {
                 (double)metrics->kvm_rm_procedure_reflect_nanoseconds / 1000000.0,
                 (double)metrics->kvm_rm_procedure_cleanup_nanoseconds / 1000000.0,
                 (double)metrics->kvm_rm_procedure_resume_nanoseconds / 1000000.0);
+        if (metrics->kvm_guest_write_calls != 0)
+          fprintf(stderr, "metrics: kvm-guest-writes=%" PRIu64 "/%" PRIu64 "B drains=%" PRIu64 "\n",
+                  metrics->kvm_guest_write_calls, metrics->kvm_guest_write_bytes,
+                  metrics->kvm_guest_write_drains);
+        if (metrics->kvm_rm_procedure_native_calls != 0)
+          fprintf(stderr,
+                  "metrics: kvm-rm-procedure-native=%" PRIu64
+                  " (host detour timings may include multiple guest callbacks)\n",
+                  metrics->kvm_rm_procedure_native_calls);
+        if (metrics->kvm_rm_procedure_bridged_calls != 0)
+          fprintf(stderr,
+                  "metrics: kvm-rm-procedure-bridged=%" PRIu64
+                  " (reflect includes protected execution to next exit)\n",
+                  metrics->kvm_rm_procedure_bridged_calls);
         fprintf(stderr,
                 "metrics: kvm-rm-procedure-setup parked-capture=%.3fms retire=%.3fms "
-                "post-pio-capture=%.3fms transition=%.3fms debug-arm=%.3fms other=%.3fms\n",
+                "transition=%.3fms other=%.3fms\n",
                 (double)metrics->kvm_rm_procedure_setup_parked_capture_nanoseconds / 1000000.0,
                 (double)metrics->kvm_rm_procedure_setup_retire_nanoseconds / 1000000.0,
-                (double)metrics->kvm_rm_procedure_setup_post_pio_capture_nanoseconds / 1000000.0,
                 (double)metrics->kvm_rm_procedure_setup_transition_nanoseconds / 1000000.0,
-                (double)metrics->kvm_rm_procedure_setup_debug_arm_nanoseconds / 1000000.0,
                 (double)setup_other / 1000000.0);
         const uint64_t resume_accounted = metrics->kvm_rm_procedure_resume_run_nanoseconds +
                                           metrics->kvm_rm_procedure_resume_capture_nanoseconds;
@@ -364,6 +409,24 @@ void daze_metrics_report_run(const DazeRunMetrics *metrics) {
         fprintf(stderr, " overflow=%" PRIu64, metrics->kvm_virtual_interrupt_site_overflow_calls);
       fprintf(stderr, "\n");
     }
+    if (metrics->kvm_guest_virtual_interrupt_calls[0] != 0 ||
+        metrics->kvm_guest_virtual_interrupt_calls[1] != 0)
+      fprintf(stderr, "metrics: kvm-guest-virtual-interrupts 0900h=%" PRIu64 " 0901h=%" PRIu64 "\n",
+              metrics->kvm_guest_virtual_interrupt_calls[0],
+              metrics->kvm_guest_virtual_interrupt_calls[1]);
+    if (metrics->kvm_guest_descriptor_calls[0] != 0 ||
+        metrics->kvm_guest_descriptor_calls[1] != 0 ||
+        metrics->kvm_guest_descriptor_calls[2] != 0 ||
+        metrics->kvm_guest_descriptor_calls[3] != 0 || metrics->kvm_guest_descriptor_calls[4] != 0)
+      fprintf(stderr,
+              "metrics: kvm-guest-descriptors 0006h=%" PRIu64 " 0007h=%" PRIu64 " 0008h=%" PRIu64
+              " 0009h=%" PRIu64 " 000ch=%" PRIu64 "\n",
+              metrics->kvm_guest_descriptor_calls[4], metrics->kvm_guest_descriptor_calls[0],
+              metrics->kvm_guest_descriptor_calls[1], metrics->kvm_guest_descriptor_calls[2],
+              metrics->kvm_guest_descriptor_calls[3]);
+    if (metrics->kvm_guest_vector_queries != 0)
+      fprintf(stderr, "metrics: kvm-guest-vector-queries 0204h=%" PRIu64 "\n",
+              metrics->kvm_guest_vector_queries);
     fprintf(stderr,
             "metrics: kvm-boundary-broker=%" PRIu64 " dos=%" PRIu64 " dpmi-entry=%" PRIu64
             " other=%" PRIu64 " service=%.3fms average=%.1fus\n",

@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <dirent.h>
+#include <sys/types.h>
 
 enum {
   DAZE_DOSFS_PATH_MAX = 4096,
@@ -45,6 +46,9 @@ int daze_dosfs_mount_is_readonly(const DazeDosfsMounts *mounts, int drive_index)
 
 typedef struct {
   int host_fds[DAZE_DOSFS_MAX_HANDLES];
+  struct DazeDosfsWriteBuffer *write_buffers[DAZE_DOSFS_MAX_HANDLES];
+  int buffered_writes;
+  int teardown_errno;
 } DazeDosfsHandles;
 
 typedef struct {
@@ -121,8 +125,19 @@ DazeDosfsStatus daze_dosfs_handles_duplicate(DazeDosfsHandles *handles, uint16_t
 DazeDosfsStatus daze_dosfs_handles_force_duplicate(DazeDosfsHandles *handles,
                                                    uint16_t source_handle, uint16_t target_handle,
                                                    int *host_errno);
-DazeDosfsStatus daze_dosfs_handles_get(const DazeDosfsHandles *handles, uint16_t dos_handle,
-                                       int *host_fd);
+DazeDosfsStatus daze_dosfs_handles_flush_and_get(const DazeDosfsHandles *handles,
+                                                 uint16_t dos_handle, int *host_fd);
+/* Lookup without flushing: for validity queries and writes that retain buffered data. */
+DazeDosfsStatus daze_dosfs_handles_peek(const DazeDosfsHandles *handles, uint16_t dos_handle,
+                                        int *host_fd);
+DazeDosfsStatus daze_dosfs_handles_flush(const DazeDosfsHandles *handles, int *host_errno);
+/* Credit is valid until the next host handle operation. Appending within credit
+ * cannot flush or perform I/O; the caller must drain guest bytes before that operation. */
+uint16_t daze_dosfs_handles_write_credit(const DazeDosfsHandles *handles, uint16_t handle);
+int daze_dosfs_handles_append_buffered(DazeDosfsHandles *handles, uint16_t handle,
+                                       const uint8_t *bytes, uint16_t count);
+ssize_t daze_dosfs_handles_write(DazeDosfsHandles *handles, uint16_t dos_handle,
+                                 const uint8_t *bytes, size_t count);
 DazeDosfsStatus daze_dosfs_handles_close(DazeDosfsHandles *handles, uint16_t dos_handle,
                                          int *host_errno);
 void daze_dosfs_handles_close_all(DazeDosfsHandles *handles);

@@ -8,6 +8,7 @@
 #include "port.h"
 #include "runner_resume.h"
 #include "protected.h"
+#include "write_batch.h"
 #include "raw_switch.h"
 
 #include "exec_psp.h"
@@ -86,11 +87,11 @@ static int runner_frame_record(DazeKvmMachine *machine, uint8_t vector,
 static int install_gate(DazeKvmMachine *machine, uint8_t vector, uint16_t segment,
                         uint16_t offset) {
   const uint8_t gate[] = {
-    0x50,                       /* push ax */
-    0xb0, vector,               /* mov al, vector */
-    0xe6, DAZE_PORT_GATE,       /* out 0xf4,al */
-    0x83, 0xc4,           0x02, /* add sp,0x2 */
-    0xcf                        /* iret */
+    0x50,                 /* push ax */
+    0xb0, vector,         /* mov al,vector */
+    0xe6, DAZE_PORT_GATE, /* out 0xf4,al */
+    0x58,                 /* pop ax */
+    0xcf                  /* iret */
   };
   uint8_t ivt[4] = {(uint8_t)offset, (uint8_t)(offset >> 8), (uint8_t)segment,
                     (uint8_t)(segment >> 8)};
@@ -206,8 +207,11 @@ DazeKvmPreflightBoundaryDisposition daze_kvm_preflight_boundary_broker(
   const uint8_t vector = record != NULL ? (uint8_t)daze_read_u16(record + 16) : 0;
   const uint8_t function = record != NULL ? (uint8_t)(daze_read_u16(record) >> 8) : 0;
   const uint64_t started = metrics != NULL ? monotonic_nanoseconds() : 0;
+  if (!daze_kvm_write_batch_drain(machine, files)) return DAZE_KVM_PREFLIGHT_BOUNDARY_FAILED;
   const DazeKvmPreflightBoundaryDisposition disposition = preflight_boundary_broker_impl(
     machine, files, process_state, dos_memory, dpmi_entry_segment, record, mailbox, result);
+  if (disposition == DAZE_KVM_PREFLIGHT_BOUNDARY_HANDLED)
+    daze_kvm_write_batch_arm(machine, files, record, mailbox);
   if (disposition == DAZE_KVM_PREFLIGHT_BOUNDARY_UNSUPPORTED && vector == DAZE_INT_DOS) {
     /* The gate's live CS:IP points into the transport stub; report the saved
      * guest return address and registers instead. */
@@ -294,6 +298,9 @@ int bootstrap_real_mode_runner(DazeKvmMachine *machine, const DazeImage *image,
                                uint16_t dos_vector_segment, uint16_t load_segment,
                                const uint8_t *psp_override,
                                const DazeKvmRunnerRequestCommon *process) {
+  if (daze_kvm_write_batch_pending(machine)) return 0;
+  daze_kvm_write_batch_revoke(machine);
+  machine->write_batch_installed = 0;
   const int image_ok = load_mz(machine, image, header, load_segment);
   const int process_ok =
     image_ok && (process->exec_child ||

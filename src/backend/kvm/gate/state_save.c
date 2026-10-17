@@ -1,5 +1,6 @@
 #include "interrupt_vector.h"
 #include "kvm_state_save_gate.h"
+#include "machine_access.h"
 
 #include "idt_gate.h"
 #include "kvm_bytes.h"
@@ -96,6 +97,7 @@ static int widen_16bit_caller_frame(DazeKvmMachine *machine,
   memcpy((uint8_t *)machine->guest + boundary->ss_base + caller_stack - 4, widened,
          sizeof(widened));
   regs.rsp = boundary->esp - 4;
+  daze_kvm_machine_debug_invalidate(machine);
   return ioctl(machine->vcpu, KVM_SET_REGS, &regs) < 0 ? -1 : 1;
 }
 #endif

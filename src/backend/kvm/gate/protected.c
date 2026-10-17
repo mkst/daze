@@ -10,11 +10,45 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include "rm_entry.h"
 
 #if defined(__linux__) && (defined(__x86_64__) || defined(__i386__))
 #include <linux/kvm.h>
 #include <sys/ioctl.h>
 #endif
+
+static int virtual_layout_valid(const DazeKvmProtectedGateLayout *layout) {
+  if ((layout->virtual_handler_address == 0) != (layout->virtual_control_address == 0)) return 0;
+  if (layout->virtual_handler_address == 0) return 1;
+  const struct {
+    uint32_t address;
+    size_t size;
+  } ranges[] = {
+    {layout->handler_address,
+     DAZE_KVM_PROTECTED_GATE_HANDLER_MAX_SIZE + DAZE_KVM_PROTECTED_GATE_VIRTUAL_PREFIX_SIZE},
+    {layout->dos_handler_address, DAZE_KVM_PROTECTED_GATE_HANDLER_MAX_SIZE},
+    {layout->default_dos_stub_address, DAZE_KVM_PROTECTED_GATE_DEFAULT_DOS_STUB_SIZE},
+    {layout->record_address, DAZE_KVM_DPMI_RECORD_SIZE},
+    {layout->mailbox_address, DAZE_KVM_DPMI_MAILBOX_SIZE},
+    {layout->idt_address, (size_t)layout->idt_limit + 1},
+    {layout->legacy_np_capture_address, 32},
+    {layout->virtual_handler_address, DAZE_KVM_PROTECTED_GATE_VIRTUAL_HANDLER_SIZE},
+    {layout->virtual_control_address, DAZE_KVM_PROTECTED_GATE_VIRTUAL_CONTROL_SIZE},
+  };
+  for (size_t i = 0; i < sizeof(ranges) / sizeof(ranges[0]); i++) {
+    if ((uint64_t)ranges[i].address + ranges[i].size > UINT64_C(0x100000000)) return 0;
+    if (ranges[i].address == 0) continue;
+    for (size_t j = 7; j < sizeof(ranges) / sizeof(ranges[0]); j++)
+      if (i < j && daze_kvm_ranges_overlap(ranges[i].address, ranges[i].size, ranges[j].address,
+                                           ranges[j].size))
+        return 0;
+  }
+  for (size_t j = 1; j < 7; j++)
+    if (ranges[j].address != 0 && daze_kvm_ranges_overlap(ranges[0].address, ranges[0].size,
+                                                          ranges[j].address, ranges[j].size))
+      return 0;
+  return 1;
+}
 
 static int layout_valid(const DazeKvmProtectedGateLayout *layout) {
   const uint32_t exception_entry_end =
@@ -33,6 +67,7 @@ static int layout_valid(const DazeKvmProtectedGateLayout *layout) {
       layout->exchange_limit == 0 || layout->exchange_limit > DAZE_KVM_PROTECTED_GATE_MAX_EXCHANGES)
     return 0;
   if (layout->exception_gate_type != 0 && layout->exception_gate_type != 0x8e) return 0;
+  if (!virtual_layout_valid(layout)) return 0;
   return !daze_kvm_ranges_overlap(layout->handler_address, DAZE_KVM_PROTECTED_GATE_HANDLER_MAX_SIZE,
                                   layout->record_address, DAZE_KVM_DPMI_RECORD_SIZE) &&
          (layout->dos_handler_address == 0 ||
@@ -84,6 +119,62 @@ int daze_kvm_protected_gate_build(const DazeKvmProtectedGateLayout *layout,
   if (output == NULL || !layout_valid(layout)) return 0;
   DazeKvmProtectedGateArtifacts built = {0};
   size_t size = 0;
+  if (layout->virtual_handler_address) {
+    for (unsigned function = 0x0900; function <= 0x0901; function++) {
+      const uint8_t compare[] = {0x66, 0x3d, (uint8_t)function, 0x09, /* cmp ax,0900h/0901h */
+                                 0x0f, 0x84};                         /* je rel32 */
+      memcpy(built.handler + size, compare, sizeof(compare));
+      size += sizeof(compare);
+      daze_write_u32(built.handler + size,
+                     layout->virtual_handler_address - (layout->handler_address + size + 4));
+      size += 4;
+    }
+    size_t helper_size = 0;
+    const uint8_t prologue[] = {
+      0x55, 0x89, 0xe5,                   /* push ebp; mov ebp,esp */
+      0x0f, 0xa0, 0x50,                   /* push fs; push eax */
+      0x66, 0xb8, 0,    0,    0x8e, 0xe0, /* mov ax,selector; mov fs,ax */
+      0x58, 0x52, 0x88, 0xc2,             /* pop eax; push edx; mov dl,al */
+    };
+    memcpy(built.virtual_handler, prologue, sizeof(prologue));
+    daze_write_u16(built.virtual_handler + 8, layout->handler_data_selector);
+    helper_size = sizeof(prologue);
+    const uint8_t index[] = {0x0f, 0xb6, 0xd2}; /* movzx edx,dl */
+    memcpy(built.virtual_handler + helper_size, index, sizeof(index));
+    helper_size += sizeof(index);
+    for (unsigned high = 0; high < 2; high++) {
+      const uint8_t counter[] = {0x64, 0x83, high ? 0x14 : 0x04, 0xd5};
+      /* add/adc dword fs:[edx*8+counter],1/0 */
+      memcpy(built.virtual_handler + helper_size, counter, sizeof(counter));
+      helper_size += sizeof(counter);
+      daze_write_u32(built.virtual_handler + helper_size,
+                     layout->virtual_control_address + 4 + high * 4);
+      helper_size += 4;
+      built.virtual_handler[helper_size++] = high ? 0 : 1;
+    }
+    emit_address(built.virtual_handler, &helper_size, 0xa0,
+                 layout->virtual_control_address); /* mov al,fs:[state] */
+    emit_memory_register(built.virtual_handler, &helper_size, 0x88, 0x15,
+                         layout->virtual_control_address); /* mov fs:[state],dl */
+    const uint8_t epilogue[] = {
+      0x5a, /* pop edx */
+      0x66,
+      0x83,
+      0x65,
+      layout->interrupt_gate_type == 0x86 ? 8 : 12,
+      0xfe,
+      /* and word [ebp+FLAGS],0fffeh */
+      0x0f,
+      0xa1,
+      0x5d, /* pop fs; pop ebp */
+    };
+    memcpy(built.virtual_handler + helper_size, epilogue, sizeof(epilogue));
+    helper_size += sizeof(epilogue);
+    if (layout->interrupt_gate_type == 0x86) built.virtual_handler[helper_size++] = 0x66;
+    built.virtual_handler[helper_size++] = 0xcf; /* iret/iretd */
+    built.virtual_handler_size = helper_size;
+    built.virtual_control[0] = 1;
+  }
   /* Preserve the client FS and use an explicitly writable flat selector for
    * the fixed linear mediator buffers. CS is flat but intentionally cannot
    * be used for stores through a code descriptor. */
@@ -193,13 +284,15 @@ int daze_kvm_protected_gate_build(const DazeKvmProtectedGateLayout *layout,
   built.handler_size = size;
   daze_kvm_encode_idt_gate(built.idt_entry, layout->handler_address, layout->handler_selector,
                            layout->interrupt_gate_type);
-  memcpy(built.dos_handler, built.handler, built.handler_size);
-  for (size_t index = 0; index + 3 < built.handler_size; ++index)
+  const size_t prefix =
+    layout->virtual_handler_address ? DAZE_KVM_PROTECTED_GATE_VIRTUAL_PREFIX_SIZE : 0;
+  memcpy(built.dos_handler, built.handler + prefix, built.handler_size - prefix);
+  for (size_t index = 0; index + 3 < built.handler_size - prefix; ++index)
     if (built.dos_handler[index] == 0xb0 &&
         built.dos_handler[index + 1] == DAZE_KVM_DPMI_MEDIATOR_MARKER &&
         built.dos_handler[index + 2] == 0xe6 && built.dos_handler[index + 3] == 0xf4) {
       built.dos_handler[index + 1] = DAZE_KVM_PROTECTED_DOS_MARKER;
-      built.dos_handler_size = built.handler_size;
+      built.dos_handler_size = built.handler_size - prefix;
       break;
     }
   if (built.dos_handler_size == 0) return 0;
@@ -228,6 +321,27 @@ int daze_kvm_protected_gate_build(const DazeKvmProtectedGateLayout *layout,
   built.default_dos_stub[size++] = (uint8_t)(layout->handler_selector >> 8);
   if (size != sizeof(built.default_dos_stub)) return 0;
   built.default_dos_stub_size = size;
+  if (layout->rm_entry_address != 0) {
+    if (layout->rm_entry_address != DAZE_KVM_RM_ENTRY_LINEAR ||
+        layout->handler_address != 0xfde800 || layout->record_address != 0xfdea00 ||
+        layout->mailbox_address != 0xfdea40 || layout->handler_selector != DAZE_SEL_GATE_CODE ||
+        layout->handler_data_selector != DAZE_SEL_GATE_DATA || layout->interrupt_gate_type != 0x8e)
+      return 0;
+    int patched = 0;
+    for (size_t i = 0; i + 4 < built.handler_size; ++i) {
+      if (memcmp(built.handler + i, (const uint8_t[]){0xb0, 0x31, 0xe6, 0xf4}, 4)) continue;
+      const size_t pos = i + 2;
+      if (built.handler_size + 3 > sizeof(built.handler)) return 0;
+      memmove(built.handler + pos + 5, built.handler + pos + 2, built.handler_size - pos - 2);
+      built.handler[pos] = 0xe9; /* jmp rel32: enter the guarded callback helper */
+      built.rm_entry_epilogue = layout->handler_address + (uint32_t)pos + 5;
+      daze_write_u32(built.handler + pos + 1, layout->rm_entry_address - built.rm_entry_epilogue);
+      built.handler_size += 3;
+      patched = 1;
+      break;
+    }
+    if (!patched) return 0;
+  }
   *output = built;
   return 1;
 }
@@ -365,6 +479,9 @@ static int process_mediator_boundary_impl(DazeKvmMachine *machine, DazeKvmDpmiMe
                                           const DazeKvmDpmiEntryResult *boundary,
                                           DazeKvmProtectedGateExchange *exchange) {
   if (!mediator_pio(boundary)) return 0;
+  if (!daze_kvm_protected_gate_sync_virtual_interrupts(machine, layout,
+                                                       mediator->virtual_interrupts_enabled))
+    return 0;
   const uint8_t *record = mediator->guest + mediator->record_address;
   exchange->boundary = *boundary;
   exchange->function = daze_read_u16(record);
@@ -379,6 +496,8 @@ static int process_mediator_boundary_impl(DazeKvmMachine *machine, DazeKvmDpmiMe
       mediator->rm_procedure_present == 0)
     return 0;
   const uint8_t *mailbox = mediator->guest + mediator->mailbox_address;
+  if (layout->virtual_control_address)
+    mediator->guest[layout->virtual_control_address] = *mediator->virtual_interrupts_enabled != 0;
   /* No separate DS mailbox slot exists. Pack preserved DS above reply ES,
    * matching the handler's low-word ES comparison and high-word DS reload. */
   uint8_t *mutable_mailbox = mediator->guest + mediator->mailbox_address;
@@ -400,6 +519,27 @@ static int process_mediator_boundary_impl(DazeKvmMachine *machine, DazeKvmDpmiMe
   if (exchange->function != 0x0205 || (uint8_t)exchange->selector == layout->exception_gate_vector)
     return 1;
   return install_interrupt_gate(machine, mediator, layout, (uint8_t)exchange->selector);
+}
+
+int daze_kvm_protected_gate_sync_virtual_interrupts(DazeKvmMachine *machine,
+                                                    const DazeKvmProtectedGateLayout *layout,
+                                                    int *enabled) {
+  if (machine == NULL || layout == NULL) return 0;
+  if (layout->virtual_control_address == 0) return layout->virtual_handler_address == 0;
+  if (machine->guest == NULL || enabled == NULL || layout->virtual_handler_address == 0 ||
+      !daze_kvm_range_fits(machine->guest_size, layout->virtual_control_address,
+                           DAZE_KVM_PROTECTED_GATE_VIRTUAL_CONTROL_SIZE))
+    return 0;
+  uint8_t *control = (uint8_t *)machine->guest + layout->virtual_control_address;
+  if (control[0] > 1) return 0;
+  *enabled = control[0];
+  if (machine->run_metrics != NULL && machine->run_metrics->enabled)
+    for (unsigned i = 0; i < 2; i++)
+      machine->run_metrics->kvm_guest_virtual_interrupt_calls[i] +=
+        daze_read_u32(control + 4 + i * 8) | ((uint64_t)daze_read_u32(control + 8 + i * 8) << 32);
+  /* Drain before EXEC snapshots so restored parents cannot count the same calls twice. */
+  memset(control + 4, 0, 16);
+  return 1;
 }
 
 static void record_dpmi_function(DazeRunMetrics *metrics, uint16_t function, uint64_t nanoseconds) {
@@ -493,6 +633,9 @@ static int run_from_boundary(DazeKvmMachine *machine, DazeKvmDpmiMediator *media
                              DazeKvmProtectedGateResult *result) {
   DazeKvmDpmiEntryResult current = *boundary;
   for (size_t index = 0; index < layout->exchange_limit; ++index) {
+    if (!daze_kvm_protected_gate_sync_virtual_interrupts(machine, layout,
+                                                         mediator->virtual_interrupts_enabled))
+      return DAZE_KVM_PROTECTED_GATE_INVALID;
     DazeKvmProtectedGateExchange *exchange = result->exchanges + index;
     exchange->boundary = current;
     if (!mediator_pio(&exchange->boundary)) {
@@ -523,6 +666,9 @@ static int run_from_boundary(DazeKvmMachine *machine, DazeKvmDpmiMediator *media
       return DAZE_KVM_PROTECTED_GATE_OK;
     }
   }
+  if (!daze_kvm_protected_gate_sync_virtual_interrupts(machine, layout,
+                                                       mediator->virtual_interrupts_enabled))
+    return DAZE_KVM_PROTECTED_GATE_INVALID;
   if (!capture_parked_terminal(machine, &current)) return DAZE_KVM_PROTECTED_GATE_FAILED;
   result->terminal = current;
   const uint8_t *record = mediator->guest + mediator->record_address;

@@ -12,7 +12,15 @@ enum DazeSelector {
   DAZE_SEL_GATE_CODE = 0x0050,
   DAZE_SEL_GATE_DATA = 0x0058,
   DAZE_SEL_GATE_ALIAS = 0x0060,
+  DAZE_SEL_EXCEPTION_RETURN = 0x00a0,
   DAZE_SEL_LOCKED_STACK = 0x0048,
+  /* Private preload caches; client descriptor allocations use the LDT. */
+  DAZE_SEL_RM_SS = 0x0070,
+  DAZE_SEL_RM_DS = 0x0078,
+  DAZE_SEL_RM_ES = 0x0080,
+  DAZE_SEL_RM_FS = 0x0088,
+  DAZE_SEL_RM_GS = 0x0090,
+  DAZE_SEL_RM_STACK = 0x0098,
 };
 
 #endif
