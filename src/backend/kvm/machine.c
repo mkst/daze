@@ -326,7 +326,7 @@ int daze_kvm_machine_write(void *context, uint32_t a, const void *b, size_t n) {
 }
 void daze_kvm_machine_snapshot_dispose(DazeKvmMachineSnapshot *snapshot) {
   if (snapshot == NULL) return;
-  free(snapshot->guest_bytes);
+  if (snapshot->guest_bytes != NULL) munmap(snapshot->guest_bytes, snapshot->guest_size);
   free(snapshot->cpu_state);
   *snapshot = (DazeKvmMachineSnapshot){0};
 }
@@ -340,7 +340,10 @@ int daze_kvm_machine_snapshot_take(const DazeKvmMachine *machine,
   const size_t chunks = (candidate.guest_size - 1) / sizeof(snapshot_zero_chunk) + 1;
   const size_t bitmap_bytes = (chunks - 1) / 8 + 1;
   if (bitmap_bytes > SIZE_MAX - sizeof(DazeKvmMachineCpuState)) return DAZE_KVM_MACHINE_FAILED;
-  candidate.guest_bytes = calloc(1, candidate.guest_size);
+  /* Keep zero backing lazy even after repeated child EXEC snapshots. */
+  candidate.guest_bytes =
+    mmap(NULL, candidate.guest_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (candidate.guest_bytes == MAP_FAILED) return DAZE_KVM_MACHINE_FAILED;
   candidate.cpu_state = calloc(1, sizeof(DazeKvmMachineCpuState) + bitmap_bytes);
   if (candidate.guest_bytes == NULL || candidate.cpu_state == NULL) {
     daze_kvm_machine_snapshot_dispose(&candidate);

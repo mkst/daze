@@ -1,7 +1,40 @@
 #include "machine.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/mman.h>
+
+static int mapping_released(void *address) {
+  unsigned char resident;
+  errno = 0;
+  const int status = mincore(address, 1, &resident);
+  if (status == -1 && errno == ENOMEM) return 1;
+  fprintf(stderr, "snapshot mapping retained: address=%p mincore=%d errno=%d\n", address, status,
+          errno);
+  return 0;
+}
+
+static int capture_failures(DazeKvmMachine *machine, DazeKvmMachineSnapshot *snapshot) {
+  const DazeKvmMachineSnapshot saved = *snapshot;
+  for (unsigned variant = 0; variant < 2; ++variant) {
+    DazeKvmMachine view = *machine;
+    if (variant == 0)
+      view.guest_size = SIZE_MAX;
+    else
+      view.vcpu = machine->vm;
+    const int status = daze_kvm_machine_snapshot_take(&view, snapshot);
+    if (status != DAZE_KVM_MACHINE_FAILED || snapshot->guest_bytes != saved.guest_bytes ||
+        snapshot->cpu_state != saved.cpu_state || snapshot->guest_size != saved.guest_size ||
+        snapshot->write_batch_installed != saved.write_batch_installed ||
+        snapshot->valid != saved.valid ||
+        memcmp(machine->guest, snapshot->guest_bytes, machine->guest_size) != 0) {
+      fprintf(stderr, "snapshot failure variant=%u status=%d\n", variant, status);
+      return 0;
+    }
+  }
+  return 1;
+}
 
 static int restore_variants(DazeKvmMachine *machine, const DazeKvmMachineSnapshot *snapshot) {
   uint8_t *const guest = machine->guest;
@@ -54,12 +87,17 @@ static int capture_variants(DazeKvmMachine *machine) {
           if ((offset / 4096) % 8 == 0 || (offset / 4096) % 8 == 7) guest[offset] = 0x37;
         guest[view.guest_size - 1] = 0xe1;
       }
+      void *const retired = snapshot.guest_bytes;
       int status = daze_kvm_machine_snapshot_take(&view, &snapshot);
       if (status != DAZE_KVM_MACHINE_OK || !snapshot.valid ||
           snapshot.guest_size != view.guest_size ||
           memcmp(snapshot.guest_bytes, guest, view.guest_size) != 0) {
         fprintf(stderr, "capture size=%zu variant=%u status=%d\n", view.guest_size, variant,
                 status);
+        daze_kvm_machine_snapshot_dispose(&snapshot);
+        return 0;
+      }
+      if (retired != NULL && !mapping_released(retired)) {
         daze_kvm_machine_snapshot_dispose(&snapshot);
         return 0;
       }
@@ -74,7 +112,9 @@ static int capture_variants(DazeKvmMachine *machine) {
       }
     }
   }
+  void *const retired = snapshot.guest_bytes;
   daze_kvm_machine_snapshot_dispose(&snapshot);
+  if (!mapping_released(retired)) return 0;
   memset(machine->guest, 0, machine->guest_size);
   return 1;
 }
@@ -102,6 +142,7 @@ int main(void) {
       daze_kvm_machine_snapshot_take(&machine, &snapshot) != DAZE_KVM_MACHINE_OK) {
     goto out;
   }
+  if (!capture_failures(&machine, &snapshot)) goto out;
   guest[0] = 0xf4;
   if (daze_kvm_machine_set_real_mode(&machine, 0, 8, 0, 0xfffe, 0, 0) != DAZE_KVM_MACHINE_OK ||
       daze_kvm_machine_snapshot_restore(&machine, &snapshot) != DAZE_KVM_MACHINE_OK) {
