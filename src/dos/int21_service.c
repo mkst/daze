@@ -351,7 +351,7 @@ static DazeDosInt21DispatchStatus dispatch_display_string(const DazeDosInt21Cont
   }
   if (length == sizeof(output)) goto failed;
   int output_fd;
-  if (daze_dosfs_handles_get(context->files->handles, 1, &output_fd) != DAZE_DOSFS_OK) goto failed;
+  if (daze_dosfs_handles_peek(context->files->handles, 1, &output_fd) != DAZE_DOSFS_OK) goto failed;
   size_t written = 0;
   while (written < length) {
     DazeDosfsFileResult file;
@@ -834,7 +834,7 @@ DazeDosInt21DispatchStatus daze_dos_int21_dispatch(const DazeDosInt21Context *co
       return DAZE_DOS_INT21_DISPATCH_INVALID_ARGUMENT;
     int host_fd = -1;
     const int valid =
-      daze_dosfs_handles_get(context->files->handles, request->bx, &host_fd) == DAZE_DOSFS_OK;
+      daze_dosfs_handles_peek(context->files->handles, request->bx, &host_fd) == DAZE_DOSFS_OK;
     result->disposition = DAZE_DOS_INT21_HANDLED;
     if (valid) {
       result->register_write_mask = DAZE_DOS_INT21_REG_DX;
@@ -873,7 +873,7 @@ DazeDosInt21DispatchStatus daze_dos_int21_dispatch(const DazeDosInt21Context *co
     int host_fd = -1;
     DazeDosFileTimeReply reply;
     if (!daze_dos_file_time_reply(
-          daze_dosfs_handles_get(context->files->handles, request->bx, &host_fd) == DAZE_DOSFS_OK,
+          daze_dosfs_handles_peek(context->files->handles, request->bx, &host_fd) == DAZE_DOSFS_OK,
           &reply))
       return DAZE_DOS_INT21_DISPATCH_INVALID_ARGUMENT;
     result->disposition = DAZE_DOS_INT21_HANDLED;

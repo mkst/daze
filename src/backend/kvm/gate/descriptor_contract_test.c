@@ -607,23 +607,49 @@ static int vector_case(unsigned kind) {
     for (unsigned i = 0; i < 4; i++)
       daze_write_u32(guest + 0xe00000 + i * 4, (i << 22) | 0x83);
   }
-  const struct kvm_regs initial = {.rax = 0x11220204,
+  const struct kvm_regs initial = {.rax = kind == 15 ? 0x11220301 : 0x11220204,
                                    .rbx = 0x3344be00 | index,
                                    .rcx = 0x55667788,
                                    .rdx = 0x99aabbcc,
                                    .rsi = 0x12345678,
                                    .rdi = 0xabcdef98,
                                    .rbp = 0x44443333,
-                                   .rsp = kind == 12 ? 0x20 : 0x9000,
+                                   .rsp = kind == 15   ? 20
+                                          : kind == 12 ? 0x20
+                                                       : 0x9000,
                                    .rip = 0x8000,
                                    .rflags = 0xad7};
   CHECK(ioctl(machine.vcpu, KVM_SET_SREGS, &s) == 0);
   CHECK(ioctl(machine.vcpu, KVM_SET_REGS, &initial) == 0);
   CHECK(ioctl(machine.vcpu, KVM_RUN, 0) == 0);
   CHECK(current_run->exit_reason == KVM_EXIT_IO);
-  if (kind == 5 || kind == 6 || kind == 8 || kind == 9) {
+  if (kind == 5 || kind == 6 || kind == 8 || kind == 9 || kind == 15) {
     CHECK(current_run->io.port == 0xf4);
     CHECK(daze_read_u32(control + DAZE_KVM_RM_ENTRY_VECTOR_COUNT_OFFSET) == 0);
+    if (kind == 15) {
+      struct kvm_regs actual;
+      CHECK(ioctl(machine.vcpu, KVM_GET_REGS, &actual) == 0);
+      CHECK(actual.rsp == 0 && actual.rbx == initial.rbx && actual.rcx == initial.rcx &&
+            actual.rdx == initial.rdx && actual.rsi == initial.rsi && actual.rdi == initial.rdi);
+      CHECK(daze_read_u32(guest + layout.record_address) == initial.rax);
+      CHECK(daze_read_u32(guest + layout.record_address + 36) == initial.rflags);
+      uint8_t *mailbox = guest + layout.mailbox_address;
+      daze_write_u32(mailbox, initial.rax);
+      daze_write_u32(mailbox + 4, initial.rbx);
+      daze_write_u32(mailbox + 8, initial.rcx);
+      daze_write_u32(mailbox + 12, initial.rsi);
+      daze_write_u32(mailbox + 16, initial.rdi);
+      daze_write_u32(mailbox + 20, 0x00100010);
+      daze_write_u32(mailbox + 24, initial.rdx);
+      daze_write_u32(mailbox + 28, 0);
+      CHECK(ioctl(machine.vcpu, KVM_RUN, 0) == 0);
+      CHECK(current_run->exit_reason == KVM_EXIT_IO && current_run->io.port == 0x77);
+      CHECK(ioctl(machine.vcpu, KVM_GET_REGS, &actual) == 0);
+      CHECK(actual.rax == initial.rax && actual.rbx == initial.rbx && actual.rcx == initial.rcx &&
+            actual.rdx == initial.rdx && actual.rsi == initial.rsi && actual.rdi == initial.rdi &&
+            actual.rbp == initial.rbp && actual.rsp == initial.rsp &&
+            actual.rflags == (initial.rflags & ~UINT64_C(1)));
+    }
   } else {
     CHECK(current_run->io.port == 0x77);
     struct kvm_regs actual;
@@ -643,7 +669,7 @@ static int vector_case(unsigned kind) {
     CHECK(s.ds.selector == 0x10 && s.es.selector == 0x10 && s.gs.selector == 0x10 &&
           s.fs.selector == (kind == 13 ? 0x84 : 0x58));
   }
-  const uint64_t queries = kind == 5 || kind == 6 || kind == 8 || kind == 9 ? 0 : 1;
+  const uint64_t queries = kind == 5 || kind == 6 || kind == 8 || kind == 9 || kind == 15 ? 0 : 1;
   if (kind == 14) {
     metrics.enabled = 0;
     daze_kvm_rm_entry_sync_metrics(&machine);
@@ -678,7 +704,7 @@ int main(void) {
     int status = set_descriptor_case(kind);
     if (status != 0) return status;
   }
-  for (unsigned kind = 0; kind < 15; ++kind) {
+  for (unsigned kind = 0; kind < 16; ++kind) {
     int status = vector_case(kind);
     if (status != 0) return status;
   }

@@ -29,6 +29,11 @@ native_entry:
   cmp word ptr fs:[REC], 9
   jbe descriptor_entry
 callback_entry:
+  /* A 16-bit stack can wrap to zero; explicit [esp-4] cannot. */
+  cmp esp, 4
+  jb callback_host_exit
+  cmp esp, 0xffec
+  ja callback_host_exit
   mov fs:[PS], eax
   mov fs:[PS+4], ebx
   mov fs:[PS+8], ecx
@@ -57,10 +62,6 @@ callback_entry:
   jne fallback
   test dword ptr fs:[0xfdea24], 0x30100
   jne fallback
-  cmp esp, 4
-  jb fallback
-  cmp esp, 0xffec
-  ja fallback
   mov ax, ss
   cmp ax, 0x10
   jne fallback
@@ -286,6 +287,7 @@ fallback:
   mov esi, fs:[PS+16]
   mov edi, fs:[PS+20]
   mov eax, fs:[PS]
+callback_host_exit:
   out 0xf4, al
   jmp dword ptr fs:[CTRL+0x30]
 

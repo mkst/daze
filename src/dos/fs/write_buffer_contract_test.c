@@ -143,10 +143,30 @@ static void deferred_errors(DazeDosfsFileService *files) {
   int host_errno = 0, fd;
   assert(daze_dosfs_handles_duplicate(files->handles, handle, &duplicate, &host_errno) ==
          DAZE_DOSFS_OK);
+  assert(daze_dosfs_handles_force_duplicate(files->handles, handle, 1, &host_errno) ==
+         DAZE_DOSFS_OK);
   assert(setrlimit(RLIMIT_FSIZE, &limited) == 0);
   char bytes[64];
   memset(bytes, 'q', sizeof(bytes));
   write_bytes(files, handle, bytes, sizeof(bytes));
+  const DazeDosInt21Context context = {.files = files};
+  const uint16_t queries[] = {0x4400, 0x5700, 0x5701};
+  DazeDosInt21Result reply;
+  for (size_t i = 0; i < sizeof(queries) / sizeof(queries[0]); ++i) {
+    DazeDosInt21Request query = {.ax = queries[i], .bx = handle};
+    assert(daze_dos_int21_dispatch(&context, &query, &reply) == DAZE_DOS_INT21_DISPATCH_OK);
+    assert(reply.disposition == DAZE_DOS_INT21_HANDLED &&
+           !(reply.flag_values & DAZE_DOS_INT21_FLAG_CF));
+    query.bx = UINT16_MAX;
+    assert(daze_dos_int21_dispatch(&context, &query, &reply) == DAZE_DOS_INT21_DISPATCH_OK);
+    assert(reply.ax == 6 && (reply.flag_values & DAZE_DOS_INT21_FLAG_CF));
+  }
+  struct stat information;
+  assert(daze_dosfs_handles_peek(files->handles, handle, &fd) == DAZE_DOSFS_OK);
+  assert(fstat(fd, &information) == 0 && information.st_size == 0);
+  assert(daze_dosfs_file_write_character(files, '!', &host_errno) == DAZE_DOSFS_HOST_ERROR &&
+         host_errno == EFBIG);
+  assert(daze_dosfs_file_write_character(files, '!', NULL) == DAZE_DOSFS_HOST_ERROR);
   assert(daze_dosfs_handles_get(files->handles, handle, &fd) == DAZE_DOSFS_HOST_ERROR &&
          errno == EFBIG);
   daze_dosfs_file_seek(files, handle, 0, 0, &result);
@@ -161,9 +181,7 @@ static void deferred_errors(DazeDosfsFileService *files) {
   assert(!result.success);
   daze_dosfs_file_create(files, "LIMIT.BIN", &result);
   assert(!result.success);
-  const DazeDosInt21Context context = {.files = files};
   const DazeDosInt21Request request = {.ax = 0x4300};
-  DazeDosInt21Result reply;
   assert(daze_dos_int21_dispatch(&context, &request, &reply) == DAZE_DOS_INT21_DISPATCH_OK);
   assert(reply.ax != 0 && reply.disposition == DAZE_DOS_INT21_HANDLED &&
          reply.register_write_mask == DAZE_DOS_INT21_REG_AX &&
@@ -202,6 +220,7 @@ static void deferred_errors(DazeDosfsFileService *files) {
   assert(pread(fd, actual, sizeof(actual), 0) == sizeof(actual) &&
          memcmp(bytes, actual, sizeof(bytes)) == 0);
   assert(daze_dosfs_handles_close(files->handles, duplicate, NULL) == DAZE_DOSFS_OK);
+  assert(daze_dosfs_handles_close(files->handles, 1, NULL) == DAZE_DOSFS_OK);
   daze_dosfs_file_create(files, "CLEANUP.BIN", &result);
   assert(result.success);
   DazeDosfsExecHandles scope = {0};

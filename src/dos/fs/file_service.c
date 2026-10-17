@@ -327,7 +327,10 @@ DazeDosfsStatus daze_dosfs_file_write_character(DazeDosfsFileService *service, u
   if (service == NULL || service->handles == NULL) return DAZE_DOSFS_INVALID_PATH;
   int host_fd = -1;
   DazeDosfsStatus status = daze_dosfs_handles_get(service->handles, 1, &host_fd);
-  if (status != DAZE_DOSFS_OK) return status;
+  if (status != DAZE_DOSFS_OK) {
+    if (status == DAZE_DOSFS_HOST_ERROR && host_errno != NULL) *host_errno = errno;
+    return status;
+  }
   for (;;) {
     const ssize_t written = write(host_fd, &character, 1);
     if (written == 1) return DAZE_DOSFS_OK;
