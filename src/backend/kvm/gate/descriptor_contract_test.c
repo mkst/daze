@@ -623,8 +623,12 @@ static int vector_case(unsigned kind) {
   CHECK(ioctl(machine.vcpu, KVM_SET_REGS, &initial) == 0);
   CHECK(ioctl(machine.vcpu, KVM_RUN, 0) == 0);
   CHECK(current_run->exit_reason == KVM_EXIT_IO);
-  if (kind == 5 || kind == 6 || kind == 8 || kind == 9 || kind == 15) {
+  const int hosted = kind == 5 || kind == 6 || kind == 8 || kind == 9;
+  if (hosted || kind == 15) {
     CHECK(current_run->io.port == 0xf4);
+    CHECK(current_run->io.direction == KVM_EXIT_IO_OUT && current_run->io.size == 1 &&
+          current_run->io.count == 1);
+    CHECK(*((const uint8_t *)current_run + current_run->io.data_offset) == 0x31);
     CHECK(daze_read_u32(control + DAZE_KVM_RM_ENTRY_VECTOR_COUNT_OFFSET) == 0);
     if (kind == 15) {
       struct kvm_regs actual;
@@ -649,8 +653,23 @@ static int vector_case(unsigned kind) {
             actual.rdx == initial.rdx && actual.rsi == initial.rsi && actual.rdi == initial.rdi &&
             actual.rbp == initial.rbp && actual.rsp == initial.rsp &&
             actual.rflags == (initial.rflags & ~UINT64_C(1)));
+    } else {
+      DazeDpmiLinearMemory memory = {0};
+      mediator.linear_memory = &memory;
+      mediator.ldt_address = 0xfe0000;
+      mediator.ldt_size = 0x10000;
+      DazeKvmDpmiEntryResult boundary, successor;
+      DazeKvmProtectedGateExchange exchange;
+      CHECK(daze_kvm_dpmi_entry_observe_mediator_or_capture(&machine, &boundary) ==
+            DAZE_KVM_DPMI_ENTRY_OK);
+      CHECK(daze_kvm_protected_gate_resume_mediator_boundary(&machine, &mediator, &layout,
+                                                             &boundary, &exchange, &successor) ==
+            DAZE_KVM_PROTECTED_GATE_OK);
+      CHECK(exchange.function == 0x0204);
+      mediator.linear_memory = NULL;
     }
-  } else {
+  }
+  if (kind != 15) {
     CHECK(current_run->io.port == 0x77);
     struct kvm_regs actual;
     CHECK(ioctl(machine.vcpu, KVM_GET_REGS, &actual) == 0);
@@ -664,12 +683,12 @@ static int vector_case(unsigned kind) {
     CHECK(actual.rsi == initial.rsi && actual.rdi == initial.rdi && actual.rbp == initial.rbp &&
           actual.rsp == initial.rsp);
     CHECK(actual.rflags == (initial.rflags & ~UINT64_C(1)));
-    CHECK(daze_read_u32(control + DAZE_KVM_RM_ENTRY_VECTOR_COUNT_OFFSET) == 1);
+    CHECK(daze_read_u32(control + DAZE_KVM_RM_ENTRY_VECTOR_COUNT_OFFSET) == (unsigned)!hosted);
     CHECK(ioctl(machine.vcpu, KVM_GET_SREGS, &s) == 0);
     CHECK(s.ds.selector == 0x10 && s.es.selector == 0x10 && s.gs.selector == 0x10 &&
           s.fs.selector == (kind == 13 ? 0x84 : 0x58));
   }
-  const uint64_t queries = kind == 5 || kind == 6 || kind == 8 || kind == 9 || kind == 15 ? 0 : 1;
+  const uint64_t queries = hosted || kind == 15 ? 0 : 1;
   if (kind == 14) {
     metrics.enabled = 0;
     daze_kvm_rm_entry_sync_metrics(&machine);

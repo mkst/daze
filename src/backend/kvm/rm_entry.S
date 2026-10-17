@@ -296,7 +296,7 @@ vector_entry:
   jne callback_entry
   mov eax, cr0
   test eax, 0x80000000
-  jnz callback_entry
+  jnz descriptor_fallback
   jmp descriptor_reply
 
 descriptor_entry:
