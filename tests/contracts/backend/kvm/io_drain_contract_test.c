@@ -1,5 +1,5 @@
 #define ioctl drain_ioctl
-#include "machine.c"
+#include "backend/kvm/machine.c"
 #undef ioctl
 
 #include <stdio.h>

@@ -4,7 +4,7 @@
 #define daze_kvm_command_owner_continue contract_owner_continue
 #define daze_kvm_command_owner_start_exec contract_owner_exec
 #define daze_kvm_command_owner_handoff_destroy contract_owner_destroy
-#include "normal_operation.c"
+#include "backend/kvm/normal_operation.c"
 
 #include <assert.h>
 #include <string.h>

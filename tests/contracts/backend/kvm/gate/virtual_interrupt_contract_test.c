@@ -1,5 +1,5 @@
 #if defined(__linux__) && (defined(__x86_64__) || defined(__i386__))
-#include "protected.c"
+#include "backend/kvm/gate/protected.c"
 #include "child_context.h"
 #include "descriptor.h"
 #include "machine_access.h"

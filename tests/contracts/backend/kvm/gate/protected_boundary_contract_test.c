@@ -1,5 +1,5 @@
 /* Buffer-backed vector and mailbox contracts keep private metrics helpers private. */
-#include "protected.c"
+#include "backend/kvm/gate/protected.c"
 
 #include <assert.h>
 

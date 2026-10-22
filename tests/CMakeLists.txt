@@ -1,0 +1,1444 @@
+if(NOT BUILD_TESTING)
+  include("${CMAKE_SOURCE_DIR}/cmake/ExternalTests.cmake")
+  return()
+endif()
+
+include_directories("${CMAKE_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}/unit/support")
+
+function(daze_register_simple_contract_test name target)
+  add_test(NAME "${name}" COMMAND "${target}")
+endfunction()
+
+# Shared utilities.
+add_executable(metrics_contract_test contracts/metrics/metrics_contract_test.c)
+daze_configure_c11_pedantic_target(metrics_contract_test PRIVATE)
+target_link_libraries(metrics_contract_test PRIVATE daze_metrics)
+daze_register_simple_contract_test(metrics-contract metrics_contract_test)
+
+add_executable(byte_order_contract_test contracts/arch/byte_order_contract_test.c)
+daze_configure_c11_pedantic_target(byte_order_contract_test PRIVATE)
+add_test(NAME byte-order-contract COMMAND byte_order_contract_test)
+
+add_executable(mz_layout_contract_test contracts/loader/mz_layout_contract_test.c)
+daze_configure_c11_pedantic_target(mz_layout_contract_test PRIVATE)
+target_link_libraries(mz_layout_contract_test PRIVATE daze_mz_layout)
+add_test(NAME mz-layout-contract COMMAND mz_layout_contract_test)
+
+add_executable(image_process_contract_test
+  contracts/loader/image_process_contract_test.c
+  ${CMAKE_SOURCE_DIR}/src/loader/image.c
+)
+daze_configure_c11_pedantic_target(image_process_contract_test PRIVATE)
+add_test(NAME image-process-contract COMMAND image_process_contract_test)
+
+# The BIOS timer-tick reply is the backend-neutral result shared by Unicorn
+# and the KVM preflight broker; keep it honest without any CPU engine.
+add_executable(bios_timer_contract_test
+  contracts/bios/timer_contract_test.c
+  ${CMAKE_SOURCE_DIR}/src/bios/timer.c
+)
+daze_configure_c11_pedantic_target(bios_timer_contract_test PRIVATE)
+add_test(NAME bios-timer-contract COMMAND bios_timer_contract_test)
+
+add_executable(bios_rtc_contract_test
+  contracts/bios/rtc_contract_test.c
+  ${CMAKE_SOURCE_DIR}/src/bios/rtc.c
+)
+daze_configure_c11_pedantic_target(bios_rtc_contract_test PRIVATE)
+add_test(NAME bios-rtc-contract COMMAND bios_rtc_contract_test)
+
+# DOS and filesystem.
+add_executable(int21_service_contract_test contracts/dos/int21_service_contract_test.c)
+daze_configure_c11_pedantic_target(int21_service_contract_test PRIVATE)
+target_link_libraries(int21_service_contract_test PRIVATE daze_dos_int21_service)
+daze_register_simple_contract_test(int21-service-contract int21_service_contract_test)
+
+add_executable(int21_boundary_contract_test contracts/dos/int21_boundary_contract_test.c)
+daze_configure_c11_pedantic_target(int21_boundary_contract_test PRIVATE)
+target_link_libraries(int21_boundary_contract_test PRIVATE daze_dos_int21_service)
+daze_register_simple_contract_test(int21-boundary-contract int21_boundary_contract_test)
+
+add_executable(dos_memory_contract_test contracts/dos/memory_contract_test.c)
+daze_configure_c11_pedantic_target(dos_memory_contract_test PRIVATE)
+target_link_libraries(dos_memory_contract_test PRIVATE daze_dos_memory)
+add_test(NAME dos-memory-contract COMMAND dos_memory_contract_test)
+
+add_executable(dosfs_contract_test contracts/dos/fs/dosfs_contract_test.c)
+daze_configure_c11_pedantic_target(dosfs_contract_test PRIVATE)
+target_link_libraries(dosfs_contract_test PRIVATE daze_dosfs)
+add_test(NAME dosfs-contract COMMAND dosfs_contract_test)
+
+add_executable(dos_process_state_contract_test contracts/dos/process_state_contract_test.c)
+daze_configure_c11_pedantic_target(dos_process_state_contract_test PRIVATE)
+target_link_libraries(dos_process_state_contract_test PRIVATE daze_dosfs)
+daze_register_simple_contract_test(dos-process-state-contract dos_process_state_contract_test)
+
+add_executable(dos_date_contract_test
+  contracts/dos/date_contract_test.c
+  ${CMAKE_SOURCE_DIR}/src/dos/date.c
+)
+daze_configure_c11_pedantic_target(dos_date_contract_test PRIVATE)
+daze_register_simple_contract_test(dos-date-contract dos_date_contract_test)
+
+add_executable(dos_fcb_contract_test
+  contracts/dos/fcb_contract_test.c
+  ${CMAKE_SOURCE_DIR}/src/dos/fcb.c
+)
+daze_configure_c11_pedantic_target(dos_fcb_contract_test PRIVATE)
+daze_register_simple_contract_test(dos-fcb-contract dos_fcb_contract_test)
+
+add_executable(dos_country_contract_test
+  contracts/dos/country_contract_test.c
+  ${CMAKE_SOURCE_DIR}/src/dos/country.c
+)
+daze_configure_c11_pedantic_target(dos_country_contract_test PRIVATE)
+target_link_libraries(dos_country_contract_test PRIVATE daze_dos_int21_service)
+daze_register_simple_contract_test(dos-country-contract dos_country_contract_test)
+
+add_executable(dos_find_result_contract_test
+  contracts/dos/find_result_contract_test.c
+  ${CMAKE_SOURCE_DIR}/src/dos/find_result.c
+)
+daze_configure_c11_pedantic_target(dos_find_result_contract_test PRIVATE)
+daze_register_simple_contract_test(dos-find-result-contract dos_find_result_contract_test)
+
+add_executable(dos_exec_request_contract_test
+  contracts/dos/exec_request_contract_test.c
+  ${CMAKE_SOURCE_DIR}/src/dos/exec_request.c
+)
+daze_configure_c11_pedantic_target(dos_exec_request_contract_test PRIVATE)
+daze_register_simple_contract_test(dos-exec-request-contract dos_exec_request_contract_test)
+
+add_executable(dos_exec_psp_contract_test
+  contracts/dos/exec_psp_contract_test.c
+  ${CMAKE_SOURCE_DIR}/src/dos/exec_psp.c
+)
+daze_configure_c11_pedantic_target(dos_exec_psp_contract_test PRIVATE)
+daze_register_simple_contract_test(dos-exec-psp-contract dos_exec_psp_contract_test)
+
+add_executable(dos_exec_image_contract_test
+  contracts/dos/exec_image_contract_test.c
+  ${CMAKE_SOURCE_DIR}/src/dos/exec_image.c
+)
+daze_configure_c11_pedantic_target(dos_exec_image_contract_test PRIVATE)
+target_link_libraries(dos_exec_image_contract_test PRIVATE daze_mz_layout)
+daze_register_simple_contract_test(dos-exec-image-contract dos_exec_image_contract_test)
+
+add_executable(dos_exec_loader_contract_test
+  contracts/dos/exec_loader_contract_test.c
+  ${CMAKE_SOURCE_DIR}/src/dos/exec_loader.c
+  ${CMAKE_SOURCE_DIR}/src/dos/exec_image.c
+  ${CMAKE_SOURCE_DIR}/src/loader/image.c
+)
+daze_configure_c11_pedantic_target(dos_exec_loader_contract_test PRIVATE)
+target_link_libraries(dos_exec_loader_contract_test PRIVATE daze_dosfs daze_mz_layout)
+daze_register_simple_contract_test(dos-exec-loader-contract dos_exec_loader_contract_test)
+
+add_executable(dos_file_time_contract_test
+  contracts/dos/file_time_contract_test.c
+  ${CMAKE_SOURCE_DIR}/src/dos/file_time.c
+)
+daze_configure_c11_pedantic_target(dos_file_time_contract_test PRIVATE)
+daze_register_simple_contract_test(dos-file-time-contract dos_file_time_contract_test)
+
+add_executable(dos_file_attrs_contract_test
+  contracts/dos/file_attrs_contract_test.c
+  ${CMAKE_SOURCE_DIR}/src/dos/file_attrs.c
+)
+daze_configure_c11_pedantic_target(dos_file_attrs_contract_test PRIVATE)
+target_link_libraries(dos_file_attrs_contract_test PRIVATE daze_dosfs)
+daze_register_simple_contract_test(dos-file-attrs-contract dos_file_attrs_contract_test)
+
+add_executable(file_service_contract_test contracts/dos/fs/file_service_contract_test.c)
+daze_configure_c11_pedantic_target(file_service_contract_test PRIVATE)
+target_link_libraries(file_service_contract_test PRIVATE daze_dosfs)
+daze_register_simple_contract_test(dos-file-service-contract file_service_contract_test)
+
+add_executable(write_buffer_contract_test contracts/dos/fs/write_buffer_contract_test.c)
+daze_configure_c11_pedantic_target(write_buffer_contract_test PRIVATE)
+target_link_libraries(write_buffer_contract_test PRIVATE daze_dos_int21_service)
+daze_register_simple_contract_test(dos-write-buffer-contract write_buffer_contract_test)
+
+add_executable(dosfs_boundary_contract_test contracts/dos/fs/dosfs_boundary_contract_test.c)
+daze_configure_c11_pedantic_target(dosfs_boundary_contract_test PRIVATE)
+target_link_libraries(dosfs_boundary_contract_test PRIVATE daze_dosfs)
+daze_register_simple_contract_test(dosfs-boundary-contract dosfs_boundary_contract_test)
+
+# DPMI.
+add_executable(dpmi_descriptor_contract_test contracts/dpmi/descriptor_contract_test.c)
+daze_configure_c11_pedantic_target(dpmi_descriptor_contract_test PRIVATE)
+target_link_libraries(dpmi_descriptor_contract_test PRIVATE daze_dpmi_descriptor)
+add_test(NAME dpmi-descriptor-contract COMMAND dpmi_descriptor_contract_test)
+target_link_libraries(dpmi_descriptor_contract_test PRIVATE daze_dpmi_linear_memory)
+
+add_executable(dpmi_exception_frame_contract_test contracts/dpmi/exception_frame_contract_test.c)
+daze_configure_c11_pedantic_target(dpmi_exception_frame_contract_test PRIVATE)
+target_link_libraries(dpmi_exception_frame_contract_test PRIVATE daze_dpmi_exception_frame)
+add_test(NAME dpmi-exception-frame-contract COMMAND dpmi_exception_frame_contract_test)
+
+add_executable(dpmi_linear_memory_contract_test contracts/dpmi/linear_memory_contract_test.c)
+daze_configure_c11_pedantic_target(dpmi_linear_memory_contract_test PRIVATE)
+target_link_libraries(dpmi_linear_memory_contract_test PRIVATE daze_dpmi_linear_memory)
+add_test(NAME dpmi-linear-memory-contract COMMAND dpmi_linear_memory_contract_test)
+
+add_executable(dpmi_request_contract_test contracts/dpmi/request_contract_test.c)
+daze_configure_c11_pedantic_target(dpmi_request_contract_test PRIVATE)
+target_link_libraries(dpmi_request_contract_test PRIVATE daze_dpmi_request)
+add_test(NAME dpmi-request-contract COMMAND dpmi_request_contract_test)
+
+add_executable(dpmi_alternate_state_contract_test contracts/dpmi/alternate_state_contract_test.c)
+daze_configure_c11_pedantic_target(dpmi_alternate_state_contract_test PRIVATE)
+target_link_libraries(dpmi_alternate_state_contract_test PRIVATE daze_dpmi_alternate_state)
+daze_register_simple_contract_test(dpmi-alternate-state-contract dpmi_alternate_state_contract_test)
+
+add_executable(dpmi_process_state_contract_test contracts/dpmi/dpmi_process_state_contract_test.c)
+daze_configure_c11_pedantic_target(dpmi_process_state_contract_test PRIVATE)
+target_link_libraries(dpmi_process_state_contract_test PRIVATE daze_dpmi_process_state)
+daze_register_simple_contract_test(dpmi-process-state-contract dpmi_process_state_contract_test)
+
+add_executable(dpmi_rm_frame_contract_test contracts/dpmi/rm_frame_contract_test.c)
+daze_configure_c11_pedantic_target(dpmi_rm_frame_contract_test PRIVATE)
+target_link_libraries(dpmi_rm_frame_contract_test PRIVATE daze_dpmi_rm_frame)
+daze_register_simple_contract_test(dpmi-rm-frame-contract dpmi_rm_frame_contract_test)
+
+add_executable(dpmi_host_advertisement_contract_test
+  contracts/dpmi/advertisement_contract_test.c
+  ${CMAKE_SOURCE_DIR}/src/dpmi/advertisement.c
+)
+daze_configure_c11_pedantic_target(dpmi_host_advertisement_contract_test PRIVATE)
+daze_register_simple_contract_test(dpmi-host-advertisement-contract
+  dpmi_host_advertisement_contract_test
+)
+
+add_executable(dpmi_transition_artifacts_contract_test
+  contracts/dpmi/transition_artifacts_contract_test.c
+  ${CMAKE_SOURCE_DIR}/src/dpmi/transition_artifacts.c
+)
+daze_configure_c11_pedantic_target(dpmi_transition_artifacts_contract_test PRIVATE)
+daze_register_simple_contract_test(dpmi-transition-artifacts-contract
+  dpmi_transition_artifacts_contract_test
+)
+
+# Runtime and launch.
+set(DAZE_EXPLICIT_BACKENDS kvm)
+if(DAZE_HAS_UNICORN)
+  list(PREPEND DAZE_EXPLICIT_BACKENDS unicorn)
+endif()
+
+add_executable(raw_vector_projection_contract_test
+  contracts/runtime/raw_vector_projection_contract_test.c
+)
+daze_configure_c11_pedantic_target(raw_vector_projection_contract_test PRIVATE)
+target_link_libraries(raw_vector_projection_contract_test PRIVATE
+  daze_dos_memory daze_dpmi_descriptor
+)
+daze_register_simple_contract_test(raw-vector-projection-contract
+  raw_vector_projection_contract_test
+)
+
+add_executable(guest_memory_layout_contract_test
+  contracts/runtime/guest_memory_layout_contract_test.c
+)
+daze_configure_c11_pedantic_target(guest_memory_layout_contract_test PRIVATE)
+target_link_libraries(guest_memory_layout_contract_test PRIVATE daze_guest_memory_layout)
+daze_register_simple_contract_test(guest-memory-layout-contract guest_memory_layout_contract_test)
+
+add_executable(guest_memory_layout_boundary_contract_test
+  contracts/runtime/guest_memory_layout_boundary_contract_test.c
+)
+daze_configure_c11_pedantic_target(guest_memory_layout_boundary_contract_test PRIVATE)
+target_link_libraries(guest_memory_layout_boundary_contract_test PRIVATE daze_guest_memory_layout)
+daze_register_simple_contract_test(guest-memory-layout-boundary-contract
+  guest_memory_layout_boundary_contract_test
+)
+
+add_executable(backend_selection_contract_test contracts/runtime/backend_selection_contract_test.c)
+daze_configure_c11_pedantic_target(backend_selection_contract_test PRIVATE)
+target_link_libraries(backend_selection_contract_test PRIVATE daze_backend_selection)
+daze_register_simple_contract_test(backend-selection-contract backend_selection_contract_test)
+
+add_executable(backend_request_contract_test contracts/runtime/backend_request_contract_test.c)
+daze_configure_c11_pedantic_target(backend_request_contract_test PRIVATE)
+target_link_libraries(backend_request_contract_test PRIVATE daze_backend_selection)
+daze_register_simple_contract_test(backend-request-contract backend_request_contract_test)
+
+add_executable(command_result_contract_test contracts/runtime/command_result_contract_test.c)
+daze_configure_c11_pedantic_target(command_result_contract_test PRIVATE)
+target_link_libraries(command_result_contract_test PRIVATE daze_command_result)
+daze_register_simple_contract_test(command-result-contract command_result_contract_test)
+
+add_executable(backend_runner_contract_test contracts/runtime/backend_runner_contract_test.c)
+daze_configure_c11_pedantic_target(backend_runner_contract_test PRIVATE)
+target_compile_definitions(backend_runner_contract_test PRIVATE
+  DAZE_HAS_UNICORN=$<BOOL:${DAZE_HAS_UNICORN}>
+)
+target_link_libraries(backend_runner_contract_test PRIVATE daze_kvm_selection_metrics daze_metrics)
+daze_register_simple_contract_test(backend-runner-contract backend_runner_contract_test)
+
+add_executable(launch_contract_test
+  contracts/runtime/launch_contract_test.c
+  ${CMAKE_SOURCE_DIR}/src/runtime/launch.c
+  ${CMAKE_SOURCE_DIR}/src/loader/image.c
+  ${CMAKE_SOURCE_DIR}/src/dos/exec_loader.c
+)
+daze_configure_c11_pedantic_target(launch_contract_test PRIVATE)
+target_link_libraries(launch_contract_test PRIVATE
+  daze_kvm_prepared_request daze_guest_memory_layout daze_mz_layout daze_dosfs
+)
+daze_register_simple_contract_test(launch-preparation-contract launch_contract_test)
+
+add_executable(launch_boundary_contract_test
+  contracts/runtime/launch_boundary_contract_test.c
+  ${CMAKE_SOURCE_DIR}/src/loader/image.c
+  ${CMAKE_SOURCE_DIR}/src/dos/exec_loader.c
+)
+daze_configure_c11_pedantic_target(launch_boundary_contract_test PRIVATE)
+target_link_libraries(launch_boundary_contract_test PRIVATE
+  daze_kvm_prepared_request daze_guest_memory_layout daze_mz_layout daze_dosfs
+)
+daze_register_simple_contract_test(launch-boundary-contract launch_boundary_contract_test)
+
+add_test(NAME backend-cli
+  COMMAND "${CMAKE_COMMAND}" -DRUNNER=$<TARGET_FILE:daze> "-DEXPECTED_VERSION=${DAZE_VERSION}" -P
+  ${CMAKE_SOURCE_DIR}/tests/backend_cli.cmake
+)
+
+add_executable(continuation_contract_test contracts/runtime/continuation_contract_test.c)
+daze_configure_c11_pedantic_target(continuation_contract_test PRIVATE)
+target_link_libraries(continuation_contract_test PRIVATE daze_kvm_machine)
+foreach(backend IN LISTS DAZE_EXPLICIT_BACKENDS)
+  add_test(NAME continuation-${backend}-contract
+    COMMAND continuation_contract_test $<TARGET_FILE:daze> ${backend}
+  )
+  set_tests_properties(continuation-${backend}-contract PROPERTIES TIMEOUT 60)
+endforeach()
+set_tests_properties(continuation-kvm-contract PROPERTIES SKIP_RETURN_CODE 77)
+
+add_executable(launch_regression_contract_test contracts/runtime/launch_regression_contract_test.c)
+daze_configure_c11_pedantic_target(launch_regression_contract_test PRIVATE)
+target_compile_definitions(launch_regression_contract_test PRIVATE
+  DAZE_HAS_UNICORN=$<BOOL:${DAZE_HAS_UNICORN}>
+)
+target_link_libraries(launch_regression_contract_test PRIVATE daze_kvm_machine)
+foreach(backend IN LISTS DAZE_EXPLICIT_BACKENDS)
+  add_test(NAME launch-regression-${backend}-contract
+    COMMAND launch_regression_contract_test $<TARGET_FILE:daze> ${backend}
+  )
+  set_tests_properties(launch-regression-${backend}-contract PROPERTIES TIMEOUT 30)
+endforeach()
+add_test(NAME launch-regression-auto-contract
+  COMMAND launch_regression_contract_test $<TARGET_FILE:daze> auto
+)
+set_tests_properties(launch-regression-auto-contract PROPERTIES TIMEOUT 30)
+set_tests_properties(launch-regression-kvm-contract PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(launch-regression-auto-contract PROPERTIES SKIP_RETURN_CODE 77)
+
+add_executable(backend_smoke_contract_test contracts/runtime/backend_smoke_contract_test.c)
+daze_configure_c11_pedantic_target(backend_smoke_contract_test PRIVATE)
+target_compile_definitions(backend_smoke_contract_test PRIVATE
+  DAZE_HAS_UNICORN=$<BOOL:${DAZE_HAS_UNICORN}> DAZE_HAS_KVM=$<BOOL:${DAZE_TARGET_HAS_KVM}>
+)
+target_link_libraries(backend_smoke_contract_test PRIVATE daze_kvm_machine)
+foreach(backend IN ITEMS ${DAZE_EXPLICIT_BACKENDS} auto omitted)
+  add_test(NAME backend-smoke-${backend}-contract
+    COMMAND backend_smoke_contract_test $<TARGET_FILE:daze> ${backend}
+  )
+  set_tests_properties(backend-smoke-${backend}-contract PROPERTIES TIMEOUT 30)
+endforeach()
+set_tests_properties(
+  backend-smoke-kvm-contract
+  backend-smoke-auto-contract
+  backend-smoke-omitted-contract
+  PROPERTIES
+  SKIP_RETURN_CODE 77
+)
+
+add_executable(launch_cli_contract_test contracts/runtime/launch_cli_contract_test.c)
+daze_configure_c11_pedantic_target(launch_cli_contract_test PRIVATE)
+target_compile_definitions(launch_cli_contract_test PRIVATE
+  DAZE_HAS_UNICORN=$<BOOL:${DAZE_HAS_UNICORN}>
+)
+target_link_libraries(launch_cli_contract_test PRIVATE daze_kvm_machine)
+add_test(NAME launch-setup-contract COMMAND launch_cli_contract_test $<TARGET_FILE:daze> setup)
+foreach(backend IN ITEMS ${DAZE_EXPLICIT_BACKENDS} auto omitted)
+  add_test(NAME launch-execution-${backend}-contract
+    COMMAND launch_cli_contract_test $<TARGET_FILE:daze> ${backend}
+  )
+  set_tests_properties(launch-execution-${backend}-contract PROPERTIES TIMEOUT 30)
+endforeach()
+set_tests_properties(
+  launch-execution-kvm-contract
+  launch-execution-auto-contract
+  launch-execution-omitted-contract
+  PROPERTIES
+  SKIP_RETURN_CODE 77
+)
+
+# KVM.
+add_executable(kvm_process_layout_contract_test
+  contracts/backend/kvm/process_layout_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_process_layout_contract_test PRIVATE)
+target_link_libraries(kvm_process_layout_contract_test PRIVATE
+  daze_kvm_process_layout daze_guest_memory_layout
+)
+daze_register_simple_contract_test(kvm-process-layout-contract kvm_process_layout_contract_test)
+
+# Shared-vs-KVM range boundary equivalence. Both helpers are header-inline,
+# so this test links no library; it pins identical fits/overlap semantics.
+add_executable(kvm_range_equivalence_contract_test
+  contracts/backend/kvm/range_equivalence_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_range_equivalence_contract_test PRIVATE)
+daze_register_simple_contract_test(kvm-range-equivalence-contract
+  kvm_range_equivalence_contract_test
+)
+
+add_executable(kvm_runner_process_valid_contract_test
+  contracts/backend/kvm/runner/process_valid_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_runner_process_valid_contract_test PRIVATE)
+target_link_libraries(kvm_runner_process_valid_contract_test PRIVATE daze_kvm_runner)
+daze_register_simple_contract_test(kvm-runner-process-valid-contract
+  kvm_runner_process_valid_contract_test
+)
+
+add_executable(kvm_runner_boundary_contract_test
+  contracts/backend/kvm/runner/boundary_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_runner_boundary_contract_test PRIVATE)
+target_link_libraries(kvm_runner_boundary_contract_test PRIVATE daze_kvm_runner)
+daze_register_simple_contract_test(kvm-runner-boundary-contract kvm_runner_boundary_contract_test)
+
+add_executable(kvm_runner_execution_boundary_contract_test
+  contracts/backend/kvm/runner/execution_boundary_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_runner_execution_boundary_contract_test PRIVATE)
+target_link_libraries(kvm_runner_execution_boundary_contract_test PRIVATE daze_kvm_runner)
+daze_register_simple_contract_test(kvm-runner-execution-boundary-contract
+  kvm_runner_execution_boundary_contract_test
+)
+set_tests_properties(kvm-runner-execution-boundary-contract PROPERTIES
+  LABELS "contract;local;requires-kvm" SKIP_RETURN_CODE 77 TIMEOUT 10
+)
+
+add_executable(kvm_machine_candidate_contract_test
+  contracts/backend/kvm/machine_candidate_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_machine_candidate_contract_test PRIVATE)
+target_link_libraries(kvm_machine_candidate_contract_test PRIVATE daze_kvm_machine_candidate)
+daze_register_simple_contract_test(kvm-machine-candidate-contract
+  kvm_machine_candidate_contract_test
+)
+
+add_executable(kvm_machine_diagnostic_contract_test
+  contracts/backend/kvm/machine_diagnostic_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_machine_diagnostic_contract_test PRIVATE)
+target_link_libraries(kvm_machine_diagnostic_contract_test PRIVATE
+  daze_kvm_machine_diagnostic daze_kvm_machine_candidate
+)
+daze_register_simple_contract_test(kvm-machine-diagnostic-contract
+  kvm_machine_diagnostic_contract_test
+)
+
+add_executable(kvm_candidate_observation_contract_test
+  contracts/backend/kvm/diagnostic/candidate_observation_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_candidate_observation_contract_test PRIVATE)
+target_link_libraries(kvm_candidate_observation_contract_test PRIVATE
+  daze_kvm_candidate_observation
+)
+daze_register_simple_contract_test(kvm-candidate-observation-contract
+  kvm_candidate_observation_contract_test
+)
+add_test(NAME kvm-candidate-observation-host COMMAND kvm_candidate_observation_contract_test --host)
+set_tests_properties(kvm-candidate-observation-host PROPERTIES SKIP_RETURN_CODE 77)
+
+add_executable(kvm_prepared_request_contract_test
+  contracts/backend/kvm/prepared_request_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_prepared_request_contract_test PRIVATE)
+target_link_libraries(kvm_prepared_request_contract_test PRIVATE daze_kvm_prepared_request)
+daze_register_simple_contract_test(kvm-prepared-request-contract kvm_prepared_request_contract_test)
+
+add_executable(kvm_command_result_contract_test
+  contracts/backend/kvm/command/result_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_command_result_contract_test PRIVATE)
+target_link_libraries(kvm_command_result_contract_test PRIVATE daze_kvm_command_result)
+daze_register_simple_contract_test(kvm-command-result-contract kvm_command_result_contract_test)
+
+add_executable(kvm_machine_contract_test
+  contracts/backend/kvm/machine_contract_test.c
+  ${CMAKE_SOURCE_DIR}/src/loader/image.c
+)
+daze_configure_c11_pedantic_target(kvm_machine_contract_test PRIVATE)
+target_link_libraries(kvm_machine_contract_test PRIVATE daze_kvm_machine)
+add_test(NAME kvm-machine-contract COMMAND kvm_machine_contract_test)
+set_tests_properties(kvm-machine-contract PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME kvm-machine-invalid COMMAND kvm_machine_contract_test --invalid)
+
+add_executable(kvm_machine_sync_contract_test contracts/backend/kvm/machine_sync_contract_test.c)
+daze_configure_c11_pedantic_target(kvm_machine_sync_contract_test PRIVATE)
+target_link_libraries(kvm_machine_sync_contract_test PRIVATE daze_kvm_machine)
+add_test(NAME kvm-machine-sync-contract COMMAND kvm_machine_sync_contract_test)
+set_tests_properties(kvm-machine-sync-contract PROPERTIES SKIP_RETURN_CODE 77)
+
+add_executable(kvm_io_drain_contract_test contracts/backend/kvm/io_drain_contract_test.c)
+daze_configure_c11_pedantic_target(kvm_io_drain_contract_test PRIVATE)
+target_link_libraries(kvm_io_drain_contract_test PRIVATE daze_kvm_machine)
+daze_register_simple_contract_test(kvm-io-drain-contract kvm_io_drain_contract_test)
+
+add_executable(kvm_machine_boundary_contract_test
+  contracts/backend/kvm/machine_boundary_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_machine_boundary_contract_test PRIVATE)
+target_link_libraries(kvm_machine_boundary_contract_test PRIVATE daze_kvm_machine)
+daze_register_simple_contract_test(kvm-machine-boundary-contract kvm_machine_boundary_contract_test)
+set_tests_properties(kvm-machine-boundary-contract PROPERTIES
+  SKIP_RETURN_CODE 77 LABELS "contract;local;requires-kvm"
+)
+
+add_executable(kvm_machine_snapshot_contract_test
+  contracts/backend/kvm/machine_snapshot_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_machine_snapshot_contract_test PRIVATE)
+target_link_libraries(kvm_machine_snapshot_contract_test PRIVATE daze_kvm_machine)
+add_test(NAME kvm-machine-snapshot-contract COMMAND kvm_machine_snapshot_contract_test)
+set_tests_properties(kvm-machine-snapshot-contract PROPERTIES SKIP_RETURN_CODE 77)
+
+add_executable(kvm_child_context_contract_test contracts/backend/kvm/child_context_contract_test.c)
+daze_configure_c11_pedantic_target(kvm_child_context_contract_test PRIVATE)
+target_link_libraries(kvm_child_context_contract_test PRIVATE daze_kvm_child_context)
+add_test(NAME kvm-child-context-contract COMMAND kvm_child_context_contract_test)
+set_tests_properties(kvm-child-context-contract PROPERTIES SKIP_RETURN_CODE 77)
+
+add_executable(kvm_child_context_boundary_contract_test
+  contracts/backend/kvm/child_context_boundary_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_child_context_boundary_contract_test PRIVATE)
+target_link_libraries(kvm_child_context_boundary_contract_test PRIVATE daze_kvm_child_context)
+daze_register_simple_contract_test(kvm-child-context-boundary-contract
+  kvm_child_context_boundary_contract_test
+)
+add_test(NAME kvm-child-context-table-contract
+  COMMAND kvm_child_context_boundary_contract_test --kvm
+)
+set_tests_properties(kvm-child-context-table-contract PROPERTIES SKIP_RETURN_CODE 77)
+
+add_executable(kvm_machine_init_observability_contract_test
+  contracts/backend/kvm/machine_init_observability_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_machine_init_observability_contract_test PRIVATE)
+target_link_libraries(kvm_machine_init_observability_contract_test PRIVATE daze_kvm_machine)
+add_test(NAME kvm-machine-init-observability COMMAND kvm_machine_init_observability_contract_test)
+set_tests_properties(kvm-machine-init-observability PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME kvm-machine-stub-boundary
+  COMMAND ${CMAKE_C_COMPILER} -std=c11 -fsyntax-only -Wall -Wextra -Wpedantic -Werror -U__linux__
+  -U__linux -Ulinux "-I${CMAKE_SOURCE_DIR}/src/backend/kvm" "-I${CMAKE_SOURCE_DIR}/src/runtime"
+  "-I${CMAKE_SOURCE_DIR}/src/metrics" "${CMAKE_SOURCE_DIR}/src/backend/kvm/machine.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/contracts/backend/kvm/machine_init_observability_contract_test.c"
+)
+
+add_executable(kvm_write_batch_contract_test contracts/backend/kvm/write_batch_contract_test.c)
+daze_configure_c11_pedantic_target(kvm_write_batch_contract_test PRIVATE)
+target_link_libraries(kvm_write_batch_contract_test PRIVATE daze_dosfs daze_guest_memory_layout)
+daze_register_simple_contract_test(kvm-write-batch-contract kvm_write_batch_contract_test)
+
+add_executable(kvm_write_batch_execution_contract_test
+  contracts/backend/kvm/write_batch_execution_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_write_batch_execution_contract_test PRIVATE)
+target_link_libraries(kvm_write_batch_execution_contract_test PRIVATE daze_kvm_runner)
+add_test(NAME kvm-write-batch-execution-contract COMMAND kvm_write_batch_execution_contract_test)
+set_tests_properties(kvm-write-batch-execution-contract PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 10)
+
+add_executable(kvm_dpmi_entry_contract_test contracts/backend/kvm/dpmi/entry_contract_test.c)
+daze_configure_c11_pedantic_target(kvm_dpmi_entry_contract_test PRIVATE)
+target_link_libraries(kvm_dpmi_entry_contract_test PRIVATE
+  daze_kvm_dpmi_entry daze_kvm_protected_gate
+)
+add_test(NAME kvm-dpmi-entry-contract COMMAND kvm_dpmi_entry_contract_test)
+set_tests_properties(kvm-dpmi-entry-contract PROPERTIES SKIP_RETURN_CODE 77)
+
+add_executable(kvm_virtual_interrupt_contract_test
+  contracts/backend/kvm/gate/virtual_interrupt_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_virtual_interrupt_contract_test PRIVATE)
+target_link_libraries(kvm_virtual_interrupt_contract_test PRIVATE
+  daze_kvm_protected_gate daze_kvm_child_context
+)
+add_test(NAME kvm-virtual-interrupt-contract COMMAND kvm_virtual_interrupt_contract_test)
+set_tests_properties(kvm-virtual-interrupt-contract PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 10)
+
+add_executable(kvm_entry_observation_contract_test
+  contracts/backend/kvm/dpmi/entry_observation_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_entry_observation_contract_test PRIVATE)
+target_link_libraries(kvm_entry_observation_contract_test PRIVATE daze_kvm_dpmi_entry)
+daze_register_simple_contract_test(kvm-entry-observation-contract
+  kvm_entry_observation_contract_test
+)
+
+add_executable(kvm_dpmi_transition_state_contract_test
+  contracts/backend/kvm/dpmi/transition_state_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_dpmi_transition_state_contract_test PRIVATE)
+target_link_libraries(kvm_dpmi_transition_state_contract_test PRIVATE
+  daze_kvm_dpmi_transition_state
+)
+daze_register_simple_contract_test(kvm-dpmi-transition-state-contract
+  kvm_dpmi_transition_state_contract_test
+)
+
+add_executable(kvm_dpmi_transition_writer_contract_test
+  contracts/backend/kvm/dpmi/transition_writer_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_dpmi_transition_writer_contract_test PRIVATE)
+target_link_libraries(kvm_dpmi_transition_writer_contract_test PRIVATE
+  daze_kvm_dpmi_transition_writer
+)
+daze_register_simple_contract_test(kvm-dpmi-transition-writer-contract
+  kvm_dpmi_transition_writer_contract_test
+)
+
+add_executable(kvm_runner_gate_resume_contract_test
+  contracts/backend/kvm/gate/runner_resume_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_runner_gate_resume_contract_test PRIVATE)
+target_link_libraries(kvm_runner_gate_resume_contract_test PRIVATE daze_kvm_runner_gate_resume)
+add_test(NAME kvm-runner-gate-resume-contract COMMAND kvm_runner_gate_resume_contract_test)
+set_tests_properties(kvm-runner-gate-resume-contract PROPERTIES SKIP_RETURN_CODE 77)
+
+add_executable(kvm_runner_resume_boundary_contract_test
+  contracts/backend/kvm/gate/runner_resume_boundary_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_runner_resume_boundary_contract_test PRIVATE)
+target_link_libraries(kvm_runner_resume_boundary_contract_test PRIVATE daze_kvm_runner_gate_resume)
+daze_register_simple_contract_test(kvm-runner-resume-boundary-contract
+  kvm_runner_resume_boundary_contract_test
+)
+add_test(NAME kvm-runner-resume-cpu-boundary-contract
+  COMMAND kvm_runner_resume_boundary_contract_test --kvm
+)
+set_tests_properties(kvm-runner-resume-cpu-boundary-contract PROPERTIES
+  LABELS "contract;local;requires-kvm" SKIP_RETURN_CODE 77 TIMEOUT 10
+)
+
+# Same-machine wake-and-gate re-presentation: reaches the gate-resume HLT
+# successor, then wakes the halted vCPU via KVM_INTERRUPT into a pre-installed
+# guest IVT[0x30] handler that re-presents the gate-equivalent frame and lands
+# in protected mode at its own terminal.
+add_executable(kvm_hlt_wake_gate_contract_test
+  contracts/backend/kvm/gate/hlt_wake_gate_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_hlt_wake_gate_contract_test PRIVATE)
+target_link_libraries(kvm_hlt_wake_gate_contract_test PRIVATE
+  daze_kvm_runner_gate_resume daze_kvm_dpmi_entry
+)
+add_test(NAME kvm-hlt-wake-gate-contract COMMAND kvm_hlt_wake_gate_contract_test)
+set_tests_properties(kvm-hlt-wake-gate-contract PROPERTIES SKIP_RETURN_CODE 77)
+
+add_executable(kvm_preflight_boundary_broker_contract_test
+  contracts/backend/kvm/diagnostic/preflight_boundary_broker_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_preflight_boundary_broker_contract_test PRIVATE)
+target_link_libraries(kvm_preflight_boundary_broker_contract_test PRIVATE daze_kvm_runner)
+daze_register_simple_contract_test(kvm-preflight-boundary-broker-contract
+  kvm_preflight_boundary_broker_contract_test
+)
+
+add_executable(kvm_int21_boundary_contract_test
+  contracts/backend/kvm/int21_boundary_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_int21_boundary_contract_test PRIVATE)
+target_link_libraries(kvm_int21_boundary_contract_test PRIVATE daze_kvm_runner)
+daze_register_simple_contract_test(kvm-int21-boundary-contract kvm_int21_boundary_contract_test)
+add_test(NAME kvm-int21-cpu-translation-contract COMMAND kvm_int21_boundary_contract_test --kvm)
+set_tests_properties(kvm-int21-cpu-translation-contract PROPERTIES
+  LABELS "contract;local;requires-kvm" SKIP_RETURN_CODE 77 TIMEOUT 10
+)
+
+add_executable(kvm_bios_boundary_contract_test contracts/backend/kvm/bios_boundary_contract_test.c)
+daze_configure_c11_pedantic_target(kvm_bios_boundary_contract_test PRIVATE)
+target_link_libraries(kvm_bios_boundary_contract_test PRIVATE daze_kvm_runner)
+daze_register_simple_contract_test(kvm-bios-boundary-contract kvm_bios_boundary_contract_test)
+
+add_executable(kvm_generic_preflight_contract_test
+  contracts/backend/kvm/diagnostic/generic_preflight_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_generic_preflight_contract_test PRIVATE)
+target_link_libraries(kvm_generic_preflight_contract_test PRIVATE daze_kvm_runner)
+add_test(NAME kvm-generic-preflight-contract COMMAND kvm_generic_preflight_contract_test)
+set_tests_properties(kvm-generic-preflight-contract PROPERTIES SKIP_RETURN_CODE 77)
+
+add_executable(kvm_runner_resume_existing_contract_test
+  contracts/backend/kvm/diagnostic/runner_resume_existing_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_runner_resume_existing_contract_test PRIVATE)
+target_link_libraries(kvm_runner_resume_existing_contract_test PRIVATE daze_kvm_runner)
+add_test(NAME kvm-runner-resume-existing-contract COMMAND kvm_runner_resume_existing_contract_test)
+set_tests_properties(kvm-runner-resume-existing-contract PROPERTIES SKIP_RETURN_CODE 77)
+
+add_executable(kvm_transition_plan_contract_test
+  contracts/backend/kvm/transition/plan_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_transition_plan_contract_test PRIVATE)
+target_link_libraries(kvm_transition_plan_contract_test PRIVATE daze_kvm_transition_plan)
+daze_register_simple_contract_test(kvm-transition-plan-contract kvm_transition_plan_contract_test)
+
+add_executable(kvm_command_boundary_contract_test
+  contracts/backend/kvm/command/boundary_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_command_boundary_contract_test PRIVATE)
+target_link_libraries(kvm_command_boundary_contract_test PRIVATE daze_kvm_command_owner)
+daze_register_simple_contract_test(kvm-command-boundary-contract kvm_command_boundary_contract_test)
+
+add_executable(kvm_command_owner_contract_test contracts/backend/kvm/command/owner_contract_test.c)
+daze_configure_c11_pedantic_target(kvm_command_owner_contract_test PRIVATE)
+target_link_libraries(kvm_command_owner_contract_test PRIVATE
+  daze_kvm_command_owner daze_kvm_command_result
+)
+add_test(NAME kvm-command-owner-contract COMMAND kvm_command_owner_contract_test)
+set_tests_properties(kvm-command-owner-contract PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME kvm-command-owner-trace-contract
+  COMMAND kvm_command_owner_contract_test --trace-contract
+)
+set_tests_properties(kvm-command-owner-trace-contract PROPERTIES
+  SKIP_RETURN_CODE 77 LABELS "local;contract;requires-kvm"
+)
+
+add_executable(kvm_owner_input_contract_test
+  contracts/backend/kvm/command/owner_input_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_owner_input_contract_test PRIVATE)
+target_link_libraries(kvm_owner_input_contract_test PRIVATE daze_kvm_command_owner)
+daze_register_simple_contract_test(kvm-owner-input-contract kvm_owner_input_contract_test)
+
+add_executable(kvm_owner_boundary_contract_test
+  contracts/backend/kvm/command/owner_boundary_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_owner_boundary_contract_test PRIVATE)
+target_link_libraries(kvm_owner_boundary_contract_test PRIVATE daze_kvm_command_owner)
+daze_register_simple_contract_test(kvm-owner-boundary-contract kvm_owner_boundary_contract_test)
+add_test(NAME kvm-raw-continuation-contract COMMAND kvm_owner_boundary_contract_test --raw-switch)
+set_tests_properties(kvm-raw-continuation-contract PROPERTIES
+  SKIP_RETURN_CODE 77 LABELS "local;contract;requires-kvm"
+)
+
+add_executable(kvm_command_exec_reply_contract_test
+  contracts/backend/kvm/command/exec_reply_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_command_exec_reply_contract_test PRIVATE)
+target_link_libraries(kvm_command_exec_reply_contract_test PRIVATE daze_kvm_command_owner)
+add_test(NAME kvm-command-exec-reply-contract COMMAND kvm_command_exec_reply_contract_test)
+set_tests_properties(kvm-command-exec-reply-contract PROPERTIES SKIP_RETURN_CODE 77)
+
+add_executable(kvm_exec_parent_lifecycle_contract_test
+  contracts/backend/kvm/command/exec_parent_lifecycle_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_exec_parent_lifecycle_contract_test PRIVATE)
+target_link_libraries(kvm_exec_parent_lifecycle_contract_test PRIVATE
+  daze_kvm_command_owner daze_kvm_command_result
+)
+add_test(NAME kvm-exec-parent-lifecycle-contract COMMAND kvm_exec_parent_lifecycle_contract_test)
+set_tests_properties(kvm-exec-parent-lifecycle-contract PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME kvm-exec-owner-trace-contract
+  COMMAND kvm_exec_parent_lifecycle_contract_test --trace-contract
+)
+set_tests_properties(kvm-exec-owner-trace-contract PROPERTIES
+  SKIP_RETURN_CODE 77 LABELS "local;contract;requires-kvm"
+)
+
+add_executable(kvm_normal_transition_config_contract_test
+  contracts/backend/kvm/transition/normal_config_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_normal_transition_config_contract_test PRIVATE)
+target_link_libraries(kvm_normal_transition_config_contract_test PRIVATE
+  daze_kvm_normal_transition_config
+)
+daze_register_simple_contract_test(kvm-normal-transition-config-contract
+  kvm_normal_transition_config_contract_test
+)
+
+add_executable(kvm_normal_operation_contract_test
+  contracts/backend/kvm/normal_operation_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_normal_operation_contract_test PRIVATE)
+target_link_libraries(kvm_normal_operation_contract_test PRIVATE
+  daze_kvm_normal_operation daze_kvm_prepared_request
+)
+daze_register_simple_contract_test(kvm-normal-operation-contract kvm_normal_operation_contract_test)
+
+add_executable(kvm_normal_operation_boundary_contract_test
+  contracts/backend/kvm/normal_operation_boundary_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_normal_operation_boundary_contract_test PRIVATE)
+target_link_libraries(kvm_normal_operation_boundary_contract_test PRIVATE daze_kvm_normal_operation)
+daze_register_simple_contract_test(kvm-normal-operation-boundary-contract
+  kvm_normal_operation_boundary_contract_test
+)
+
+add_executable(kvm_normal_operation_execution_contract_test
+  contracts/backend/kvm/normal_operation_execution_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_normal_operation_execution_contract_test PRIVATE)
+target_link_libraries(kvm_normal_operation_execution_contract_test PRIVATE
+  daze_kvm_normal_operation
+)
+daze_register_simple_contract_test(kvm-normal-operation-execution-contract
+  kvm_normal_operation_execution_contract_test
+)
+set_tests_properties(kvm-normal-operation-execution-contract PROPERTIES
+  SKIP_RETURN_CODE 77 LABELS "local;contract;requires-kvm" TIMEOUT 10
+)
+
+add_executable(kvm_selected_operation_contract_test
+  contracts/backend/kvm/selected_operation_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_selected_operation_contract_test PRIVATE)
+target_link_libraries(kvm_selected_operation_contract_test PRIVATE daze_kvm_selected_operation)
+daze_register_simple_contract_test(kvm-selected-operation-contract
+  kvm_selected_operation_contract_test
+)
+
+add_executable(kvm_selection_diagnostic_contract_test
+  contracts/backend/kvm/diagnostic/selection_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_selection_diagnostic_contract_test PRIVATE)
+target_link_libraries(kvm_selection_diagnostic_contract_test PRIVATE daze_kvm_selection_diagnostic)
+daze_register_simple_contract_test(kvm-selection-diagnostic-contract
+  kvm_selection_diagnostic_contract_test
+)
+
+add_executable(kvm_selection_metrics_contract_test
+  contracts/backend/kvm/diagnostic/selection_metrics_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_selection_metrics_contract_test PRIVATE)
+target_link_libraries(kvm_selection_metrics_contract_test PRIVATE daze_kvm_selection_metrics)
+daze_register_simple_contract_test(kvm-selection-metrics-contract
+  kvm_selection_metrics_contract_test
+)
+
+add_library(daze_kvm_dpmi_mediator_test_driver STATIC unit/support/mediator_test_driver.c)
+daze_configure_c11_pedantic_target(daze_kvm_dpmi_mediator_test_driver PUBLIC)
+target_link_libraries(daze_kvm_dpmi_mediator_test_driver PUBLIC
+  daze_kvm_dpmi_mediator daze_kvm_machine
+)
+
+add_executable(kvm_dpmi_mediator_contract_test contracts/backend/kvm/dpmi/mediator_contract_test.c)
+daze_configure_c11_pedantic_target(kvm_dpmi_mediator_contract_test PRIVATE)
+target_link_libraries(kvm_dpmi_mediator_contract_test PRIVATE daze_kvm_dpmi_mediator_test_driver)
+add_test(NAME kvm-dpmi-mediator-contract COMMAND kvm_dpmi_mediator_contract_test)
+set_tests_properties(kvm-dpmi-mediator-contract PROPERTIES SKIP_RETURN_CODE 77)
+
+add_executable(kvm_legacy_exception_contract_test
+  contracts/backend/kvm/gate/legacy_exception_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_legacy_exception_contract_test PRIVATE)
+target_link_libraries(kvm_legacy_exception_contract_test PRIVATE daze_kvm_protected_gate)
+add_test(NAME kvm-legacy-exception-contract COMMAND kvm_legacy_exception_contract_test)
+set_tests_properties(kvm-legacy-exception-contract PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 10)
+
+add_executable(kvm_protected_boundary_contract_test
+  contracts/backend/kvm/gate/protected_boundary_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_protected_boundary_contract_test PRIVATE)
+target_link_libraries(kvm_protected_boundary_contract_test PRIVATE daze_kvm_protected_gate)
+daze_register_simple_contract_test(kvm-protected-boundary-contract
+  kvm_protected_boundary_contract_test
+)
+
+add_executable(kvm_protected_execution_contract_test
+  contracts/backend/kvm/gate/protected_execution_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_protected_execution_contract_test PRIVATE)
+target_link_libraries(kvm_protected_execution_contract_test PRIVATE
+  daze_kvm_protected_gate daze_kvm_dpmi_mediator_test_driver
+)
+daze_register_simple_contract_test(kvm-protected-execution-contract
+  kvm_protected_execution_contract_test
+)
+set_tests_properties(kvm-protected-execution-contract PROPERTIES
+  SKIP_RETURN_CODE 77 LABELS "local;contract;requires-kvm" TIMEOUT 10
+)
+
+add_executable(kvm_descriptor_contract_test contracts/backend/kvm/gate/descriptor_contract_test.c)
+daze_configure_c11_pedantic_target(kvm_descriptor_contract_test PRIVATE)
+target_link_libraries(kvm_descriptor_contract_test PRIVATE
+  daze_kvm_protected_gate daze_kvm_rm_procedure
+)
+daze_register_simple_contract_test(kvm-descriptor-contract kvm_descriptor_contract_test)
+set_tests_properties(kvm-descriptor-contract PROPERTIES
+  SKIP_RETURN_CODE 77 LABELS "local;contract;requires-kvm" TIMEOUT 10
+)
+
+add_executable(kvm_legacy_exception_boundary_contract_test
+  contracts/backend/kvm/gate/legacy_exception_boundary_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_legacy_exception_boundary_contract_test PRIVATE)
+target_link_libraries(kvm_legacy_exception_boundary_contract_test PRIVATE daze_kvm_protected_gate)
+daze_register_simple_contract_test(kvm-legacy-exception-boundary-contract
+  kvm_legacy_exception_boundary_contract_test
+)
+
+# A client-selected protected vector needs a gate type matching its target
+# descriptor's own D/B bit. Pure: no machine, no live guest, no /dev/kvm.
+add_executable(kvm_client_gate_width_contract_test
+  contracts/backend/kvm/gate/client_gate_width_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_client_gate_width_contract_test PRIVATE)
+target_link_libraries(kvm_client_gate_width_contract_test PRIVATE daze_kvm_protected_gate)
+add_test(NAME kvm-client-gate-width-contract COMMAND kvm_client_gate_width_contract_test)
+
+add_executable(kvm_default_dos_stub_contract_test
+  contracts/backend/kvm/gate/default_dos_stub_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_default_dos_stub_contract_test PRIVATE)
+target_link_libraries(kvm_default_dos_stub_contract_test PRIVATE daze_kvm_protected_gate)
+daze_register_simple_contract_test(kvm-default-dos-stub-contract kvm_default_dos_stub_contract_test)
+
+add_executable(kvm_record_mailbox_contract_test
+  contracts/backend/kvm/gate/record_mailbox_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_record_mailbox_contract_test PRIVATE)
+target_link_libraries(kvm_record_mailbox_contract_test PRIVATE daze_kvm_protected_gate)
+daze_register_simple_contract_test(kvm-record-mailbox-contract kvm_record_mailbox_contract_test)
+
+add_executable(kvm_idt_gate_contract_test contracts/backend/kvm/gate/idt_gate_contract_test.c)
+daze_configure_c11_pedantic_target(kvm_idt_gate_contract_test PRIVATE)
+add_test(NAME kvm-idt-gate-contract COMMAND kvm_idt_gate_contract_test)
+
+add_executable(kvm_rm_procedure_contract_test contracts/backend/kvm/rm_procedure_contract_test.c)
+daze_configure_c11_pedantic_target(kvm_rm_procedure_contract_test PRIVATE)
+target_link_libraries(kvm_rm_procedure_contract_test PRIVATE
+  daze_kvm_rm_procedure daze_dpmi_descriptor
+)
+daze_register_simple_contract_test(kvm-rm-procedure-contract kvm_rm_procedure_contract_test)
+set_tests_properties(kvm-rm-procedure-contract PROPERTIES
+  SKIP_RETURN_CODE 77 LABELS "contract;local;requires-kvm" TIMEOUT 10
+)
+
+add_executable(kvm_rm_procedure_boundary_contract_test
+  contracts/backend/kvm/rm_procedure_boundary_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_rm_procedure_boundary_contract_test PRIVATE)
+target_link_libraries(kvm_rm_procedure_boundary_contract_test PRIVATE
+  daze_kvm_rm_procedure daze_dpmi_descriptor
+)
+daze_register_simple_contract_test(kvm-rm-procedure-boundary-contract
+  kvm_rm_procedure_boundary_contract_test
+)
+
+add_executable(kvm_transition_boundary_contract_test
+  contracts/backend/kvm/gate/transition_boundary_contract_test.c
+)
+daze_configure_c11_pedantic_target(kvm_transition_boundary_contract_test PRIVATE)
+target_link_libraries(kvm_transition_boundary_contract_test PRIVATE
+  daze_kvm_raw_switch_gate daze_kvm_state_save_gate daze_dpmi_descriptor
+)
+daze_register_simple_contract_test(kvm-transition-boundary-contract
+  kvm_transition_boundary_contract_test
+)
+set_tests_properties(kvm-transition-boundary-contract PROPERTIES
+  SKIP_RETURN_CODE 77 LABELS "contract;local;requires-kvm"
+)
+
+# Unicorn and cross-backend adapters.
+if(DAZE_HAS_UNICORN)
+  if(NOT DAZE_BUILD_STATIC)
+    get_filename_component(UNICORN_LIBRARY_DIR "${UNICORN_LIBRARY}" DIRECTORY)
+  endif()
+
+  add_executable(int21_adapter_contract_test contracts/dos/int21_adapter_contract_test.c)
+  daze_configure_c11_pedantic_target(int21_adapter_contract_test PRIVATE)
+  target_link_libraries(int21_adapter_contract_test PRIVATE
+    daze_dos_int21_service daze_kvm_runner ${DAZE_UNICORN_LINK_LIBRARIES}
+  )
+  daze_register_simple_contract_test(int21-adapter-contract int21_adapter_contract_test)
+
+  add_executable(unicorn_registers_contract_test
+    contracts/backend/unicorn/registers_contract_test.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/unicorn_registers.c
+  )
+  daze_configure_c11_pedantic_target(unicorn_registers_contract_test PRIVATE)
+  target_link_libraries(unicorn_registers_contract_test PRIVATE ${DAZE_UNICORN_LINK_LIBRARIES})
+  if(NOT DAZE_BUILD_STATIC)
+    set_target_properties(unicorn_registers_contract_test
+      PROPERTIES BUILD_RPATH "${UNICORN_LIBRARY_DIR}"
+    )
+  endif()
+  daze_register_simple_contract_test(unicorn-registers-contract unicorn_registers_contract_test)
+
+  add_executable(unicorn_trace_config_contract_test
+    contracts/backend/unicorn/trace_config_contract_test.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/trace_config.c
+  )
+  daze_configure_c11_pedantic_target(unicorn_trace_config_contract_test PRIVATE)
+  daze_register_simple_contract_test(unicorn-trace-config-contract
+    unicorn_trace_config_contract_test
+  )
+
+  # Focused synthetic Unicorn contract for the protected DOS-vector fallback
+  # continuation. Compiled from the runner core minus the DOS launcher seam;
+  # the KVM and backend-selection sources are not part of its link.
+  add_executable(protected_dos_continuation_contract_test
+    contracts/backend/unicorn/protected_dos_continuation_contract_test.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/runtime.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/trace_config.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/int21_adapter.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/int31_adapter.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/dpmi_setup.c
+    ${CMAKE_SOURCE_DIR}/src/dpmi/transition_artifacts.c
+    ${CMAKE_SOURCE_DIR}/src/dpmi/advertisement.c
+    ${CMAKE_SOURCE_DIR}/src/dos/date.c
+    ${CMAKE_SOURCE_DIR}/src/dos/fcb.c
+    ${CMAKE_SOURCE_DIR}/src/dos/find_result.c
+    ${CMAKE_SOURCE_DIR}/src/dos/exec_request.c
+    ${CMAKE_SOURCE_DIR}/src/dos/exec_psp.c
+    ${CMAKE_SOURCE_DIR}/src/dos/exec_image.c
+    ${CMAKE_SOURCE_DIR}/src/dos/exec_loader.c
+    ${CMAKE_SOURCE_DIR}/src/dos/file_attrs.c
+    ${CMAKE_SOURCE_DIR}/src/dos/file_time.c
+    ${CMAKE_SOURCE_DIR}/src/loader/image.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/unicorn_registers.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/bios_adapter.c
+    ${CMAKE_SOURCE_DIR}/src/bios/timer.c
+    ${CMAKE_SOURCE_DIR}/src/bios/rtc.c
+  )
+  daze_configure_c11_target(protected_dos_continuation_contract_test PRIVATE)
+  target_link_libraries(protected_dos_continuation_contract_test PRIVATE
+    daze_dosfs daze_dos_int21_service daze_dos_memory daze_dpmi_descriptor daze_dpmi_exception_frame
+    daze_dpmi_linear_memory daze_dpmi_request daze_dpmi_process_state daze_dpmi_rm_frame
+    daze_mz_layout daze_metrics ${DAZE_UNICORN_LINK_LIBRARIES}
+  )
+  if(NOT DAZE_BUILD_STATIC)
+    set_target_properties(protected_dos_continuation_contract_test
+      PROPERTIES BUILD_RPATH "${UNICORN_LIBRARY_DIR}"
+    )
+  endif()
+  daze_register_simple_contract_test(protected-dos-continuation-contract
+    protected_dos_continuation_contract_test
+  )
+  add_test(NAME unicorn-trace-runtime-contract
+    COMMAND protected_dos_continuation_contract_test --trace-contract
+  )
+
+  # Test-only Unicorn driver for observing one dispatched request.
+  add_executable(unicorn_dpmi_dispatch_contract_test
+    contracts/dpmi/unicorn_dispatch_contract_test.c
+    unit/support/dpmi_test_driver.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/runtime.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/trace_config.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/int21_adapter.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/int31_adapter.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/dpmi_setup.c
+    ${CMAKE_SOURCE_DIR}/src/dpmi/transition_artifacts.c
+    ${CMAKE_SOURCE_DIR}/src/dpmi/advertisement.c
+    ${CMAKE_SOURCE_DIR}/src/dos/date.c
+    ${CMAKE_SOURCE_DIR}/src/dos/fcb.c
+    ${CMAKE_SOURCE_DIR}/src/dos/find_result.c
+    ${CMAKE_SOURCE_DIR}/src/dos/exec_request.c
+    ${CMAKE_SOURCE_DIR}/src/dos/exec_psp.c
+    ${CMAKE_SOURCE_DIR}/src/dos/exec_image.c
+    ${CMAKE_SOURCE_DIR}/src/dos/exec_loader.c
+    ${CMAKE_SOURCE_DIR}/src/dos/file_attrs.c
+    ${CMAKE_SOURCE_DIR}/src/dos/file_time.c
+    ${CMAKE_SOURCE_DIR}/src/loader/image.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/unicorn_registers.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/bios_adapter.c
+    ${CMAKE_SOURCE_DIR}/src/bios/timer.c
+    ${CMAKE_SOURCE_DIR}/src/bios/rtc.c
+  )
+  daze_configure_c11_target(unicorn_dpmi_dispatch_contract_test PRIVATE)
+  target_link_libraries(unicorn_dpmi_dispatch_contract_test PRIVATE
+    daze_dosfs daze_dos_int21_service daze_dos_memory daze_dpmi_descriptor daze_dpmi_exception_frame
+    daze_dpmi_linear_memory daze_dpmi_request daze_dpmi_process_state daze_dpmi_rm_frame
+    daze_mz_layout daze_metrics ${DAZE_UNICORN_LINK_LIBRARIES}
+  )
+  if(NOT DAZE_BUILD_STATIC)
+    set_target_properties(unicorn_dpmi_dispatch_contract_test
+      PROPERTIES BUILD_RPATH "${UNICORN_LIBRARY_DIR}"
+    )
+  endif()
+  daze_register_simple_contract_test(unicorn-dpmi-dispatch-contract
+    unicorn_dpmi_dispatch_contract_test
+  )
+  get_target_property(unicorn_adapter_contract_sources unicorn_dpmi_dispatch_contract_test SOURCES)
+  list(REMOVE_ITEM unicorn_adapter_contract_sources contracts/dpmi/unicorn_dispatch_contract_test.c)
+
+  add_executable(unicorn_adapter_boundary_contract_test
+    contracts/backend/unicorn/adapter_boundary_contract_test.c
+    ${unicorn_adapter_contract_sources}
+  )
+  daze_configure_c11_target(unicorn_adapter_boundary_contract_test PRIVATE)
+  target_link_libraries(unicorn_adapter_boundary_contract_test PRIVATE
+    daze_dosfs daze_dos_int21_service daze_dos_memory daze_dpmi_descriptor daze_dpmi_exception_frame
+    daze_dpmi_linear_memory daze_dpmi_request daze_dpmi_process_state daze_dpmi_rm_frame
+    daze_mz_layout daze_metrics ${DAZE_UNICORN_LINK_LIBRARIES}
+  )
+  if(NOT DAZE_BUILD_STATIC)
+    set_target_properties(unicorn_adapter_boundary_contract_test
+      PROPERTIES BUILD_RPATH "${UNICORN_LIBRARY_DIR}"
+    )
+  endif()
+  daze_register_simple_contract_test(unicorn-adapter-boundary-contract
+    unicorn_adapter_boundary_contract_test
+  )
+
+  add_executable(unicorn_startup_contract_test
+    contracts/backend/unicorn/startup_contract_test.c
+    ${unicorn_adapter_contract_sources}
+  )
+  daze_configure_c11_target(unicorn_startup_contract_test PRIVATE)
+  target_link_libraries(unicorn_startup_contract_test PRIVATE
+    daze_dosfs daze_dos_int21_service daze_dos_memory daze_dpmi_descriptor daze_dpmi_exception_frame
+    daze_dpmi_linear_memory daze_dpmi_request daze_dpmi_process_state daze_dpmi_rm_frame
+    daze_mz_layout daze_metrics ${DAZE_UNICORN_LINK_LIBRARIES}
+  )
+  if(NOT DAZE_BUILD_STATIC)
+    set_target_properties(unicorn_startup_contract_test
+      PROPERTIES BUILD_RPATH "${UNICORN_LIBRARY_DIR}"
+    )
+  endif()
+  daze_register_simple_contract_test(unicorn-startup-contract unicorn_startup_contract_test)
+
+  add_executable(unicorn_runtime_transport_contract_test
+    contracts/backend/unicorn/runtime_transport_contract_test.c
+    ${unicorn_adapter_contract_sources}
+  )
+  daze_configure_c11_target(unicorn_runtime_transport_contract_test PRIVATE)
+  target_link_libraries(unicorn_runtime_transport_contract_test PRIVATE
+    daze_dosfs daze_dos_int21_service daze_dos_memory daze_dpmi_descriptor daze_dpmi_exception_frame
+    daze_dpmi_linear_memory daze_dpmi_request daze_dpmi_process_state daze_dpmi_rm_frame
+    daze_mz_layout daze_metrics ${DAZE_UNICORN_LINK_LIBRARIES}
+  )
+  if(NOT DAZE_BUILD_STATIC)
+    set_target_properties(unicorn_runtime_transport_contract_test
+      PROPERTIES BUILD_RPATH "${UNICORN_LIBRARY_DIR}"
+    )
+  endif()
+  daze_register_simple_contract_test(unicorn-runtime-transport-contract
+    unicorn_runtime_transport_contract_test
+  )
+
+  foreach(boundary run bios_image)
+    add_executable(unicorn_${boundary}_boundary_contract_test
+      contracts/backend/unicorn/${boundary}_boundary_contract_test.c
+      ${CMAKE_SOURCE_DIR}/src/backend/unicorn/unicorn_image.c
+      ${unicorn_adapter_contract_sources}
+    )
+    daze_configure_c11_target(unicorn_${boundary}_boundary_contract_test PRIVATE)
+    target_link_libraries(unicorn_${boundary}_boundary_contract_test PRIVATE
+      daze_dosfs daze_dos_int21_service daze_dos_memory daze_dpmi_descriptor
+      daze_dpmi_exception_frame daze_dpmi_linear_memory daze_dpmi_request daze_dpmi_process_state
+      daze_dpmi_rm_frame daze_mz_layout daze_metrics ${DAZE_UNICORN_LINK_LIBRARIES}
+    )
+    if(NOT DAZE_BUILD_STATIC)
+      set_target_properties(unicorn_${boundary}_boundary_contract_test
+        PROPERTIES BUILD_RPATH "${UNICORN_LIBRARY_DIR}"
+      )
+    endif()
+    daze_register_simple_contract_test(unicorn-${boundary}-boundary-contract
+      unicorn_${boundary}_boundary_contract_test
+    )
+  endforeach()
+
+  foreach(boundary int21 int31 runtime)
+    set(boundary_sources ${unicorn_adapter_contract_sources})
+    if(boundary STREQUAL "runtime")
+      list(REMOVE_ITEM boundary_sources ${CMAKE_SOURCE_DIR}/src/backend/unicorn/runtime.c)
+    else()
+      list(REMOVE_ITEM
+        boundary_sources ${CMAKE_SOURCE_DIR}/src/backend/unicorn/${boundary}_adapter.c
+      )
+    endif()
+    add_executable(unicorn_${boundary}_residual_contract_test
+      contracts/backend/unicorn/${boundary}_residual_contract_test.c
+      ${boundary_sources}
+    )
+    daze_configure_c11_target(unicorn_${boundary}_residual_contract_test PRIVATE)
+    target_link_libraries(unicorn_${boundary}_residual_contract_test PRIVATE
+      daze_dosfs daze_dos_int21_service daze_dos_memory daze_dpmi_descriptor
+      daze_dpmi_exception_frame daze_dpmi_linear_memory daze_dpmi_request daze_dpmi_process_state
+      daze_dpmi_rm_frame daze_mz_layout daze_metrics ${DAZE_UNICORN_LINK_LIBRARIES}
+    )
+    if(NOT DAZE_BUILD_STATIC)
+      set_target_properties(unicorn_${boundary}_residual_contract_test
+        PROPERTIES BUILD_RPATH "${UNICORN_LIBRARY_DIR}"
+      )
+    endif()
+    daze_register_simple_contract_test(unicorn-${boundary}-residual-contract
+      unicorn_${boundary}_residual_contract_test
+    )
+  endforeach()
+
+  # LDT descriptor writes skip the translation-cache flush for fresh slots and
+  # identical rewrites while keeping it for live mutations.
+  add_executable(unicorn_ldt_flush_scope_contract_test
+    contracts/dpmi/unicorn_ldt_flush_scope_contract_test.c
+    unit/support/dpmi_test_driver.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/runtime.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/trace_config.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/int21_adapter.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/int31_adapter.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/dpmi_setup.c
+    ${CMAKE_SOURCE_DIR}/src/dpmi/transition_artifacts.c
+    ${CMAKE_SOURCE_DIR}/src/dpmi/advertisement.c
+    ${CMAKE_SOURCE_DIR}/src/dos/date.c
+    ${CMAKE_SOURCE_DIR}/src/dos/fcb.c
+    ${CMAKE_SOURCE_DIR}/src/dos/find_result.c
+    ${CMAKE_SOURCE_DIR}/src/dos/exec_request.c
+    ${CMAKE_SOURCE_DIR}/src/dos/exec_psp.c
+    ${CMAKE_SOURCE_DIR}/src/dos/exec_image.c
+    ${CMAKE_SOURCE_DIR}/src/dos/exec_loader.c
+    ${CMAKE_SOURCE_DIR}/src/dos/file_attrs.c
+    ${CMAKE_SOURCE_DIR}/src/dos/file_time.c
+    ${CMAKE_SOURCE_DIR}/src/loader/image.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/unicorn_registers.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/bios_adapter.c
+    ${CMAKE_SOURCE_DIR}/src/bios/timer.c
+    ${CMAKE_SOURCE_DIR}/src/bios/rtc.c
+  )
+  daze_configure_c11_target(unicorn_ldt_flush_scope_contract_test PRIVATE)
+  target_link_libraries(unicorn_ldt_flush_scope_contract_test PRIVATE
+    daze_dosfs daze_dos_int21_service daze_dos_memory daze_dpmi_descriptor daze_dpmi_exception_frame
+    daze_dpmi_linear_memory daze_dpmi_request daze_dpmi_process_state daze_dpmi_rm_frame
+    daze_mz_layout daze_metrics ${DAZE_UNICORN_LINK_LIBRARIES}
+  )
+  if(NOT DAZE_BUILD_STATIC)
+    set_target_properties(unicorn_ldt_flush_scope_contract_test
+      PROPERTIES BUILD_RPATH "${UNICORN_LIBRARY_DIR}"
+    )
+  endif()
+  daze_register_simple_contract_test(unicorn-ldt-flush-scope-contract
+    unicorn_ldt_flush_scope_contract_test
+  )
+
+  # Compares observable replies/state after dispatch through both backend test adapters.
+  add_executable(dpmi_shared_contract_test
+    contracts/dpmi/shared_contract_test.c
+    unit/support/dpmi_test_driver.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/runtime.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/trace_config.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/int21_adapter.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/int31_adapter.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/dpmi_setup.c
+    ${CMAKE_SOURCE_DIR}/src/dpmi/transition_artifacts.c
+    ${CMAKE_SOURCE_DIR}/src/dpmi/advertisement.c
+    ${CMAKE_SOURCE_DIR}/src/dos/date.c
+    ${CMAKE_SOURCE_DIR}/src/dos/fcb.c
+    ${CMAKE_SOURCE_DIR}/src/dos/find_result.c
+    ${CMAKE_SOURCE_DIR}/src/dos/exec_request.c
+    ${CMAKE_SOURCE_DIR}/src/dos/exec_psp.c
+    ${CMAKE_SOURCE_DIR}/src/dos/exec_image.c
+    ${CMAKE_SOURCE_DIR}/src/dos/exec_loader.c
+    ${CMAKE_SOURCE_DIR}/src/dos/file_attrs.c
+    ${CMAKE_SOURCE_DIR}/src/dos/file_time.c
+    ${CMAKE_SOURCE_DIR}/src/loader/image.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/unicorn_registers.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/bios_adapter.c
+    ${CMAKE_SOURCE_DIR}/src/bios/timer.c
+    ${CMAKE_SOURCE_DIR}/src/bios/rtc.c
+  )
+  daze_configure_c11_target(dpmi_shared_contract_test PRIVATE)
+  target_link_libraries(dpmi_shared_contract_test PRIVATE
+    daze_kvm_dpmi_mediator_test_driver daze_dosfs daze_dos_int21_service daze_dos_memory
+    daze_dpmi_descriptor daze_dpmi_exception_frame daze_dpmi_linear_memory daze_dpmi_request
+    daze_dpmi_process_state daze_dpmi_rm_frame daze_mz_layout daze_metrics
+    ${DAZE_UNICORN_LINK_LIBRARIES}
+  )
+  if(NOT DAZE_BUILD_STATIC)
+    set_target_properties(dpmi_shared_contract_test PROPERTIES BUILD_RPATH "${UNICORN_LIBRARY_DIR}")
+  endif()
+  add_test(NAME dpmi-shared-contract COMMAND dpmi_shared_contract_test)
+  set_tests_properties(dpmi-shared-contract PROPERTIES SKIP_RETURN_CODE 77)
+
+  # Focused synthetic Unicorn contract for the DPMI 0305h state-procedure return
+  # frame. Compiled from the same runner core as the continuation contract above;
+  # the KVM and backend-selection sources are not part of its link.
+  add_executable(state_procedure_frame_contract_test
+    contracts/backend/unicorn/state_procedure_frame_contract_test.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/runtime.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/trace_config.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/int21_adapter.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/int31_adapter.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/dpmi_setup.c
+    ${CMAKE_SOURCE_DIR}/src/dpmi/transition_artifacts.c
+    ${CMAKE_SOURCE_DIR}/src/dpmi/advertisement.c
+    ${CMAKE_SOURCE_DIR}/src/dos/date.c
+    ${CMAKE_SOURCE_DIR}/src/dos/fcb.c
+    ${CMAKE_SOURCE_DIR}/src/dos/find_result.c
+    ${CMAKE_SOURCE_DIR}/src/dos/exec_request.c
+    ${CMAKE_SOURCE_DIR}/src/dos/exec_psp.c
+    ${CMAKE_SOURCE_DIR}/src/dos/exec_image.c
+    ${CMAKE_SOURCE_DIR}/src/dos/exec_loader.c
+    ${CMAKE_SOURCE_DIR}/src/dos/file_attrs.c
+    ${CMAKE_SOURCE_DIR}/src/dos/file_time.c
+    ${CMAKE_SOURCE_DIR}/src/loader/image.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/unicorn_registers.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/bios_adapter.c
+    ${CMAKE_SOURCE_DIR}/src/bios/timer.c
+    ${CMAKE_SOURCE_DIR}/src/bios/rtc.c
+  )
+  daze_configure_c11_target(state_procedure_frame_contract_test PRIVATE)
+  target_link_libraries(state_procedure_frame_contract_test PRIVATE
+    daze_dosfs daze_dos_int21_service daze_dos_memory daze_dpmi_descriptor daze_dpmi_exception_frame
+    daze_dpmi_linear_memory daze_dpmi_request daze_dpmi_process_state daze_dpmi_rm_frame
+    daze_mz_layout daze_metrics ${DAZE_UNICORN_LINK_LIBRARIES}
+  )
+  if(NOT DAZE_BUILD_STATIC)
+    set_target_properties(state_procedure_frame_contract_test
+      PROPERTIES BUILD_RPATH "${UNICORN_LIBRARY_DIR}"
+    )
+  endif()
+  daze_register_simple_contract_test(state-procedure-frame-contract
+    state_procedure_frame_contract_test
+  )
+
+  # Focused synthetic Unicorn contract for the DPMI legacy exception-entry
+  # transfer seam. It drives the product's own classifier, gateway writer, frame
+  # builder, entry hook and resume convention, so it links the same runner core as
+  # the state-procedure frame contract above; the KVM and backend-selection
+  # sources are not part of its link.
+  add_executable(exception_entry_transfer_contract_test
+    contracts/backend/unicorn/exception_entry_transfer_contract_test.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/runtime.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/trace_config.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/int21_adapter.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/int31_adapter.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/dpmi_setup.c
+    ${CMAKE_SOURCE_DIR}/src/dpmi/transition_artifacts.c
+    ${CMAKE_SOURCE_DIR}/src/dpmi/advertisement.c
+    ${CMAKE_SOURCE_DIR}/src/dos/date.c
+    ${CMAKE_SOURCE_DIR}/src/dos/fcb.c
+    ${CMAKE_SOURCE_DIR}/src/dos/find_result.c
+    ${CMAKE_SOURCE_DIR}/src/dos/exec_request.c
+    ${CMAKE_SOURCE_DIR}/src/dos/exec_psp.c
+    ${CMAKE_SOURCE_DIR}/src/dos/exec_image.c
+    ${CMAKE_SOURCE_DIR}/src/dos/exec_loader.c
+    ${CMAKE_SOURCE_DIR}/src/dos/file_attrs.c
+    ${CMAKE_SOURCE_DIR}/src/dos/file_time.c
+    ${CMAKE_SOURCE_DIR}/src/loader/image.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/unicorn_registers.c
+    ${CMAKE_SOURCE_DIR}/src/backend/unicorn/bios_adapter.c
+    ${CMAKE_SOURCE_DIR}/src/bios/timer.c
+    ${CMAKE_SOURCE_DIR}/src/bios/rtc.c
+  )
+  daze_configure_c11_target(exception_entry_transfer_contract_test PRIVATE)
+  target_link_libraries(exception_entry_transfer_contract_test PRIVATE
+    daze_dosfs daze_dos_int21_service daze_dos_memory daze_dpmi_descriptor daze_dpmi_exception_frame
+    daze_dpmi_linear_memory daze_dpmi_request daze_dpmi_process_state daze_dpmi_rm_frame
+    daze_mz_layout daze_metrics ${DAZE_UNICORN_LINK_LIBRARIES}
+  )
+  if(NOT DAZE_BUILD_STATIC)
+    set_target_properties(exception_entry_transfer_contract_test
+      PROPERTIES BUILD_RPATH "${UNICORN_LIBRARY_DIR}"
+    )
+  endif()
+  daze_register_simple_contract_test(exception-entry-transfer-contract
+    exception_entry_transfer_contract_test
+  )
+  add_test(NAME exception-entry-transfer-production-contract
+    COMMAND exception_entry_transfer_contract_test
+  )
+  set_tests_properties(exception-entry-transfer-production-contract PROPERTIES
+    ENVIRONMENT "DAZE_DPMI_EXCEPTION_PRODUCTION_CONTRACT=1"
+  )
+  add_test(NAME exception-entry-transfer-return-contract
+    COMMAND exception_entry_transfer_contract_test
+  )
+  add_test(NAME exception-entry-transfer-retry-present-contract
+    COMMAND exception_entry_transfer_contract_test
+  )
+  set_tests_properties(exception-entry-transfer-retry-present-contract PROPERTIES
+    ENVIRONMENT "DAZE_DPMI_EXCEPTION_RETRY_PRESENT=1"
+  )
+  add_test(NAME exception-entry-transfer-repeated-fault-contract
+    COMMAND exception_entry_transfer_contract_test
+  )
+  set_tests_properties(exception-entry-transfer-repeated-fault-contract PROPERTIES
+    ENVIRONMENT "DAZE_DPMI_EXCEPTION_REPEATED_FAULT=1"
+  )
+  add_test(NAME exception-entry-transfer-nested-delivery-contract
+    COMMAND exception_entry_transfer_contract_test
+  )
+  set_tests_properties(exception-entry-transfer-nested-delivery-contract PROPERTIES
+    ENVIRONMENT "DAZE_DPMI_EXCEPTION_NESTED_DELIVERY=1"
+  )
+  add_test(NAME exception-entry-transfer-lret-contract
+    COMMAND exception_entry_transfer_contract_test
+  )
+  set_tests_properties(exception-entry-transfer-lret-contract PROPERTIES
+    ENVIRONMENT "DAZE_DPMI_EXCEPTION_LRET=1"
+  )
+endif()
+
+# Suite labels and checks.
+# Trailing newlines are a portability requirement, not a style nit: clang
+# rejects newline-less files under -Wnewline-eof with -Wpedantic -Werror.
+# clang-format has no config knob for this (it always emits the newline), so
+# this lightweight check is the enforcement. It covers host-compiled sources
+# only; historical application inputs live in the external corpus.
+file(GLOB_RECURSE DAZE_TRAILING_NEWLINE_FILES CONFIGURE_DEPENDS
+  "${CMAKE_SOURCE_DIR}/src/*.c"
+  "${CMAKE_SOURCE_DIR}/src/*.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/*.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/*.h"
+)
+add_test(NAME trailing-newline-check
+  COMMAND "${CMAKE_COMMAND}"
+    "-DNEWLINE_CHECK_FILES=${DAZE_TRAILING_NEWLINE_FILES}"
+    -P "${CMAKE_SOURCE_DIR}/tests/check_trailing_newlines.cmake"
+)
+
+# Unit tests: these always run with the normal test presets.
+set_tests_properties(
+  dos-memory-contract
+  dpmi-descriptor-contract
+  dpmi-linear-memory-contract
+  dpmi-request-contract
+  bios-timer-contract
+  bios-rtc-contract
+  image-process-contract
+  mz-layout-contract
+  dosfs-contract
+  trailing-newline-check
+  PROPERTIES LABELS "unit"
+)
+
+get_property(daze_tests DIRECTORY PROPERTY TESTS)
+foreach(test IN LISTS daze_tests)
+  get_property(labels TEST "${test}" PROPERTY LABELS)
+  if("integration" IN_LIST labels)
+    set_property(TEST "${test}" APPEND PROPERTY LABELS external)
+  else()
+    set_property(TEST "${test}" APPEND PROPERTY LABELS local)
+    if(test MATCHES "^(continuation-|launch-regression-|backend-smoke-|unicorn-trace-runtime-)")
+      set_property(TEST "${test}" APPEND PROPERTY LABELS smoke)
+    elseif(test STREQUAL "backend-cli" OR test STREQUAL "trailing-newline-check")
+      set_property(TEST "${test}" APPEND PROPERTY LABELS check)
+    else()
+      set_property(TEST "${test}" APPEND PROPERTY LABELS contract)
+    endif()
+    get_property(skip_code TEST "${test}" PROPERTY SKIP_RETURN_CODE)
+    if(skip_code STREQUAL "77")
+      set_property(TEST "${test}" APPEND PROPERTY LABELS requires-kvm)
+    endif()
+  endif()
+endforeach()
+
+# Preserve the sibling-header lookup that contract sources had under src/.
+get_property(contract_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+foreach(target IN LISTS contract_targets)
+  get_target_property(sources ${target} SOURCES)
+  foreach(source IN LISTS sources)
+    if(source MATCHES "^contracts/(.+)/[^/]+\\.c$")
+      target_include_directories(${target} BEFORE PRIVATE
+        "${CMAKE_SOURCE_DIR}/src/${CMAKE_MATCH_1}")
+    endif()
+  endforeach()
+endforeach()
+
+include("${CMAKE_SOURCE_DIR}/cmake/ExternalTests.cmake")

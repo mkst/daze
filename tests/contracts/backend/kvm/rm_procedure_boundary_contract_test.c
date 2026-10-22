@@ -1,5 +1,5 @@
 /* Exercise the real-mode reply codec without publishing private transport APIs. */
-#include "rm_procedure.c"
+#include "backend/kvm/rm_procedure.c"
 
 #include "descriptor.h"
 #include <assert.h>
