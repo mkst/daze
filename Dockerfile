@@ -38,6 +38,7 @@ COPY CMakeLists.txt /daze/CMakeLists.txt
 COPY CMakePresets.json /daze/CMakePresets.json
 COPY cmake /daze/cmake
 COPY src /daze/src
+COPY tests/CMakeLists.txt /daze/tests/CMakeLists.txt
 
 ARG DAZE_VERSION=unknown
 ARG DAZE_PRESET=release-static
