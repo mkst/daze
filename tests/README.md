@@ -1,8 +1,17 @@
 # Local and external tests
 
 Daze keeps contract tests, synthetic MZ runtime smokes, CLI checks and shared
-test drivers here and under `src/`. They need no historical DOS binaries,
-Python environment, fixture downloads or sibling checkout.
+test drivers under `tests/`. They need no historical DOS binaries, Python
+environment, fixture downloads or sibling checkout.
+
+Contract sources live in `contracts/`, mirroring their production directories
+under `src/`; shared test drivers live in `unit/support/`. Local test targets
+and registrations belong to `tests/CMakeLists.txt`, which is added after the
+production targets from `src/CMakeLists.txt` so it inherits the backend and
+internal-header configuration. Each contract target also gets its matching
+production directory as a private include root. Tests that include a production
+`.c` file use a path relative to `src/` to disambiguate implementations with the
+same filename. Test executables are built under `build/<preset>/tests/`.
 
 ```sh
 cmake --preset debug

@@ -1,5 +1,5 @@
 /* Keep boundary codecs private while testing the same source used by the live owner. */
-#include "owner.c"
+#include "backend/kvm/command/owner.c"
 
 #include <assert.h>
 

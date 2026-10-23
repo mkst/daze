@@ -1,7 +1,7 @@
 #define _GNU_SOURCE
 #define daze_kvm_machine_get_regs batch_get_regs
 #define daze_kvm_machine_get_sregs batch_get_sregs
-#include "write_batch.c"
+#include "backend/kvm/write_batch.c"
 #undef daze_kvm_machine_get_regs
 #undef daze_kvm_machine_get_sregs
 

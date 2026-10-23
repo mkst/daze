@@ -1,5 +1,5 @@
 /* Exercise private exit decoding without exporting a test API or resuming a VM. */
-#include "entry.c"
+#include "backend/kvm/dpmi/entry.c"
 
 #include <assert.h>
 

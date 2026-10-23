@@ -17,7 +17,7 @@ static int counted_ioctl(int fd, unsigned long request, ...) {
 #define ioctl counted_ioctl
 #endif
 
-#include "runner_resume.c"
+#include "backend/kvm/gate/runner_resume.c"
 
 #undef ioctl
 

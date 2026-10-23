@@ -10,4 +10,7 @@
 !THIRD_PARTY_NOTICES.md
 !cmake/
 !src/
+!tests/
+tests/*
+!tests/CMakeLists.txt
 !tools/

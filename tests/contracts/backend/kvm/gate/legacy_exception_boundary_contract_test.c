@@ -1,4 +1,4 @@
-#include "legacy_exception.c"
+#include "backend/kvm/gate/legacy_exception.c"
 
 #include <limits.h>
 #include <stdio.h>
