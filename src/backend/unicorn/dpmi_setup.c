@@ -752,18 +752,21 @@ int daze_setup_complete_dpmi_rm_procedure(uc_engine *uc, DazeUnicornEngine *engi
   if (uc_mem_read(uc, run->rm_procedure_frame_address, frame, sizeof(frame)) != UC_ERR_OK) {
     return 0;
   }
-  daze_write_u32(frame + k_dpmi_rm_edi, get_reg32(uc, UC_X86_REG_EDI));
-  daze_write_u32(frame + k_dpmi_rm_esi, get_reg32(uc, UC_X86_REG_ESI));
-  daze_write_u32(frame + k_dpmi_rm_ebp, get_reg32(uc, UC_X86_REG_EBP));
-  daze_write_u32(frame + k_dpmi_rm_ebx, get_reg32(uc, UC_X86_REG_EBX));
-  daze_write_u32(frame + k_dpmi_rm_edx, get_reg32(uc, UC_X86_REG_EDX));
-  daze_write_u32(frame + k_dpmi_rm_ecx, get_reg32(uc, UC_X86_REG_ECX));
-  daze_write_u32(frame + k_dpmi_rm_eax, get_reg32(uc, UC_X86_REG_EAX));
-  daze_write_u16(frame + k_dpmi_rm_flags, (uint16_t)get_reg32(uc, UC_X86_REG_EFLAGS));
-  daze_write_u16(frame + k_dpmi_rm_es, get_reg16(uc, UC_X86_REG_ES));
-  daze_write_u16(frame + k_dpmi_rm_ds, get_reg16(uc, UC_X86_REG_DS));
-  daze_write_u16(frame + k_dpmi_rm_fs, get_reg16(uc, UC_X86_REG_FS));
-  daze_write_u16(frame + k_dpmi_rm_gs, get_reg16(uc, UC_X86_REG_GS));
+  const DazeDpmiRmWriteBack image = {
+    .edi = get_reg32(uc, UC_X86_REG_EDI),
+    .esi = get_reg32(uc, UC_X86_REG_ESI),
+    .ebp = get_reg32(uc, UC_X86_REG_EBP),
+    .ebx = get_reg32(uc, UC_X86_REG_EBX),
+    .edx = get_reg32(uc, UC_X86_REG_EDX),
+    .ecx = get_reg32(uc, UC_X86_REG_ECX),
+    .eax = get_reg32(uc, UC_X86_REG_EAX),
+    .flags = (uint16_t)get_reg32(uc, UC_X86_REG_EFLAGS),
+    .es = get_reg16(uc, UC_X86_REG_ES),
+    .ds = get_reg16(uc, UC_X86_REG_DS),
+    .fs = get_reg16(uc, UC_X86_REG_FS),
+    .gs = get_reg16(uc, UC_X86_REG_GS),
+  };
+  daze_dpmi_rm_frame_write_back(frame, &image);
   const int reentry_ok =
     run->rm_procedure_32bit_reentry
       ? daze_setup_write_raw_pm_reentry32_wrapper(
