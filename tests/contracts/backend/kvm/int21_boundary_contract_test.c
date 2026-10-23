@@ -3,6 +3,7 @@
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 #define CHECK(c)                                                                                   \
   do {                                                                                             \
@@ -160,6 +161,39 @@ int main(int argc, char **argv) {
   DazeDosfsHandles handles;
   daze_dosfs_handles_init(&handles);
   DazeDosfsFileService files = {.handles = &handles};
+  FILE *output = tmpfile();
+  CHECK(output != NULL);
+  CHECK(daze_dosfs_handles_bind_standard(&handles, STDIN_FILENO, fileno(output), STDERR_FILENO,
+                                         NULL) == DAZE_DOSFS_OK);
+  for (unsigned function = 2; function <= 6; function += 4) {
+    for (unsigned flags = 0; flags < 4; ++flags) {
+      memset(record, 0, sizeof(record));
+      daze_write_u16(record, (uint16_t)(function << 8 | 0xb7));
+      daze_write_u16(record + 6, 'A');
+      daze_write_u16(record + 16, 0x21);
+      const uint16_t caller_flags = (uint16_t)(0xa02 | (flags & 1) | ((flags & 2) << 5));
+      daze_write_u16(record + 22, caller_flags);
+      CHECK(daze_kvm_int21_dispatch(&machine, &files, NULL, NULL, record, mailbox, NULL) ==
+            DAZE_KVM_PREFLIGHT_BOUNDARY_HANDLED);
+      CHECK(daze_read_u16(mailbox) == (function << 8 | 'A'));
+      CHECK(daze_read_u16(mailbox + 14) ==
+            (function == 2 ? caller_flags : (caller_flags & ~0x41u)));
+    }
+  }
+  rewind(output);
+  for (unsigned i = 0; i < 8; ++i)
+    CHECK(fgetc(output) == 'A');
+  CHECK(fgetc(output) == EOF);
+  CHECK(daze_dosfs_handles_close(&handles, 1, NULL) == DAZE_DOSFS_OK);
+  for (unsigned function = 2; function <= 6; function += 4) {
+    daze_write_u16(record, (uint16_t)(function << 8 | 0xb7));
+    CHECK(daze_kvm_int21_dispatch(&machine, &files, NULL, NULL, record, mailbox, NULL) ==
+          DAZE_KVM_PREFLIGHT_BOUNDARY_FAILED);
+    CHECK(daze_read_u16(mailbox) == (function << 8 | 0xb7));
+    CHECK(daze_read_u16(mailbox + 14) == daze_read_u16(record + 22));
+  }
+  daze_dosfs_handles_close_all(&handles);
+  CHECK(fclose(output) == 0);
   DazeDosProcessState process;
   daze_dos_process_state_init(&process, 0x100);
   daze_write_u16(record + 16, 0x21);

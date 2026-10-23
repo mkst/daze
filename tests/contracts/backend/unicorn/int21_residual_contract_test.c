@@ -37,6 +37,8 @@ int main(void) {
   call(uc, &context, &files, 0x0200, 0, 'A', 0x0241, 1);
   call(uc, &context, &files, 0x0600, 0, 'B', 0x0642, 0);
   assert(!(get_reg32(uc, UC_X86_REG_EFLAGS) & 0x40));
+  assert(context.engine.metrics.host_write_calls == 2 &&
+         context.engine.metrics.host_write_bytes == 2);
   rewind(output);
   assert(fgetc(output) == 'A' && fgetc(output) == 'B' && fgetc(output) == EOF);
   for (int function = 2; function <= 6; function += 4) {
@@ -50,6 +52,7 @@ int main(void) {
   }
   call(uc, &context, &files, 0x0600, 0, 0xff, 0x0600, 0);
   assert(get_reg32(uc, UC_X86_REG_EFLAGS) & 0x40);
+  assert(context.engine.metrics.host_write_calls == 2);
   call(uc, &context, &files, 0x0b00, 0, 0, 0x0b00, 0);
   call(uc, &context, &files, 0x5d06, 0, 0, 0x5d06, 0);
   assert(get_reg16(uc, UC_X86_REG_DS) == k_dos_int21_vector_segment);

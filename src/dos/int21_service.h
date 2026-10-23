@@ -109,6 +109,7 @@ typedef enum {
   DAZE_DOS_INT21_DISPATCH_OK = 1,
   DAZE_DOS_INT21_DISPATCH_INVALID_ARGUMENT = 0,
   DAZE_DOS_INT21_DISPATCH_MEMORY_FAILURE = -1,
+  DAZE_DOS_INT21_DISPATCH_IO_FAILURE = -2,
 } DazeDosInt21DispatchStatus;
 
 int daze_dos_int21_is_shared_function(uint8_t ah);

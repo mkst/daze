@@ -383,8 +383,7 @@ int main(void) {
                                          &result) != DAZE_KVM_PREFLIGHT_BOUNDARY_UNSUPPORTED)
     return 1;
 
-  /* Console replies differ by backend: KVM 02h preserves AX/ZF and clears CF;
-   * 06h output replaces AL and preserves ZF. Keep these observable replies pinned. */
+  /* Character services return AL through the broker; failed host output is terminal. */
   {
     int output_pipe[2] = {-1, -1};
     uint8_t output[2] = {0};
@@ -406,7 +405,7 @@ int main(void) {
     if (daze_kvm_preflight_boundary_broker(&machine, &files, &process_state, &dos_memory, 0x2200,
                                            record, mailbox,
                                            &result) != DAZE_KVM_PREFLIGHT_BOUNDARY_HANDLED ||
-        daze_read_u16(mailbox) != 0x02aa || (daze_read_u16(mailbox + 14) & 1u) != 0 ||
+        daze_read_u16(mailbox) != 0x0241 || (daze_read_u16(mailbox + 14) & 1u) == 0 ||
         (daze_read_u16(mailbox + 14) & 0x40u) == 0 || read(output_pipe[0], output, 1) != 1 ||
         output[0] != 'A') {
       close(output_pipe[0]);
@@ -423,7 +422,7 @@ int main(void) {
                                            record, mailbox,
                                            &result) != DAZE_KVM_PREFLIGHT_BOUNDARY_HANDLED ||
         daze_read_u16(mailbox) != 0x0642 || (daze_read_u16(mailbox + 14) & 1u) != 0 ||
-        (daze_read_u16(mailbox + 14) & 0x40u) == 0 || read(output_pipe[0], output, 1) != 1 ||
+        (daze_read_u16(mailbox + 14) & 0x40u) != 0 || read(output_pipe[0], output, 1) != 1 ||
         output[0] != 'B') {
       close(output_pipe[0]);
       return 1;
@@ -445,8 +444,8 @@ int main(void) {
     daze_write_u16(record + 22, 0x0243);
     if (daze_kvm_preflight_boundary_broker(&machine, &files, &process_state, &dos_memory, 0x2200,
                                            record, mailbox,
-                                           &result) != DAZE_KVM_PREFLIGHT_BOUNDARY_HANDLED ||
-        daze_read_u16(mailbox) != 1 || (daze_read_u16(mailbox + 14) & 1u) == 0 ||
+                                           &result) != DAZE_KVM_PREFLIGHT_BOUNDARY_FAILED ||
+        daze_read_u16(mailbox) != 0x02aa || (daze_read_u16(mailbox + 14) & 1u) == 0 ||
         (daze_read_u16(mailbox + 14) & 0x40u) == 0)
       return 1;
 
@@ -458,8 +457,8 @@ int main(void) {
     daze_write_u16(record + 22, 0x0243);
     if (daze_kvm_preflight_boundary_broker(&machine, &files, &process_state, &dos_memory, 0x2200,
                                            record, mailbox,
-                                           &result) != DAZE_KVM_PREFLIGHT_BOUNDARY_HANDLED ||
-        daze_read_u16(mailbox) != 1 || (daze_read_u16(mailbox + 14) & 1u) == 0 ||
+                                           &result) != DAZE_KVM_PREFLIGHT_BOUNDARY_FAILED ||
+        daze_read_u16(mailbox) != 0x06aa || (daze_read_u16(mailbox + 14) & 1u) == 0 ||
         (daze_read_u16(mailbox + 14) & 0x40u) == 0)
       return 1;
 

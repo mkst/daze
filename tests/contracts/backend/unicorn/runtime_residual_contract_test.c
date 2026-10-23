@@ -174,6 +174,34 @@ static void tracing(void) {
   uc_close(uc);
 }
 
+static void character_output_continuation_failure(void) {
+  uc_engine *uc = fixture();
+  DazeUnicornContext context = {0};
+  DazeDosfsHandles handles;
+  daze_dosfs_handles_init(&handles);
+  DazeDosfsFileService files = {.handles = &handles};
+  for (unsigned function = 2; function <= 6; function += 4) {
+    set_reg16(uc, UC_X86_REG_AX, (uint16_t)(function << 8 | 0xb7));
+    set_reg16(uc, UC_X86_REG_DX, 'A');
+    set_reg32(uc, UC_X86_REG_EFLAGS, 0x243);
+    context.run = (DazeUnicornRunState){.host_dos_gate = 0, .interrupt_already_advanced = 0};
+    context.run.dos_continuation.active = 1;
+    assert(uc_context_alloc(uc, &context.run.dos_continuation.caller_context) == UC_ERR_OK);
+    assert(uc_context_save(uc, context.run.dos_continuation.caller_context) == UC_ERR_OK);
+    assert(!protected_dos_continuation_serve(uc, &context.engine, &context.run, &context.process,
+                                             &files));
+    assert(!context.run.dos_continuation.active &&
+           context.run.dos_continuation.caller_context == NULL);
+    assert(!context.run.use_resume_address && !context.run.continue_run && !context.run.terminated);
+    assert(!context.run.host_dos_gate && !context.run.interrupt_already_advanced);
+    assert(get_reg16(uc, UC_X86_REG_AX) == (function << 8 | 0xb7));
+    assert(get_reg32(uc, UC_X86_REG_EFLAGS) == 0x243 && get_reg16(uc, UC_X86_REG_IP) == 0x100);
+    assert(context.engine.metrics.host_write_calls == 0);
+  }
+  daze_dosfs_handles_close_all(&handles);
+  uc_close(uc);
+}
+
 static void continuation_guards(void) {
   uc_engine *uc = fixture();
   DazeUnicornContext context = {0};
@@ -518,6 +546,7 @@ int main(void) {
   flags_and_switch();
   tracing();
   continuation_guards();
+  character_output_continuation_failure();
   projection_guards();
   selector_guards();
   exception_hook_guards();
