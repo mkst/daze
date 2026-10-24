@@ -85,8 +85,8 @@ static int remaining_requests(DazeKvmDpmiMediatorTestFixture *fixture) {
 
   const DazeDpmiRequest information = {
     .function = 0x0500, .vector_segment = 0x10, .vector_offset = 0x2800};
-  memset(guest + 0x2800, 0xa5, 48);
-  pass &= run_case(fixture, &information) &&
+  memset(guest + 0x27ff, 0xa5, 50);
+  pass &= run_case(fixture, &information) && guest[0x27ff] == 0xa5 && guest[0x2830] == 0xa5 &&
           daze_read_u32(guest + 0x2800) ==
             daze_dpmi_linear_memory_largest_available(&fixture->linear_memory);
   for (size_t i = 4; i < 48; ++i)

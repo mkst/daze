@@ -56,12 +56,15 @@ int main(void) {
   assert(daze_read_u16(after) == 0xffff && (after[6] & 15) == 15);
   set_reg16(uc, UC_X86_REG_ES, 0);
   set_reg16(uc, UC_X86_REG_DI, 0x1000);
+  uint8_t info[50];
+  memset(info, 0xa5, sizeof(info));
+  assert(uc_mem_write(uc, 0x0fff, info, sizeof(info)) == UC_ERR_OK);
   call(uc, &context, 0x0500, 0, 0, 0, 0x0500, 0);
-  uint8_t info[48];
-  assert(uc_mem_read(uc, 0x1000, info, sizeof(info)) == UC_ERR_OK);
-  assert(daze_read_u32(info) ==
+  assert(uc_mem_read(uc, 0x0fff, info, sizeof(info)) == UC_ERR_OK);
+  assert(info[0] == 0xa5 && info[49] == 0xa5);
+  assert(daze_read_u32(info + 1) ==
          daze_dpmi_linear_memory_largest_available(&context.process.dpmi.linear_memory));
-  for (size_t i = 4; i < sizeof(info); ++i)
+  for (size_t i = 5; i < 49; ++i)
     assert(info[i] == 0xff);
   assert(uc_mem_unmap(uc, 0x1000, 0x1000) == UC_ERR_OK);
   call(uc, &context, 0x0500, 0, 0, 0, DAZE_DPMI_ERR_INVALID_SELECTOR, 1);

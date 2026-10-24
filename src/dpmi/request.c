@@ -1,5 +1,6 @@
 #include "request.h"
 
+#include "byte_order.h"
 #include "descriptor.h"
 #include "dpmi_error.h"
 #include "dpmi_function.h"
@@ -145,6 +146,12 @@ void daze_dpmi_request_get_free_memory_information(const DazeDpmiLinearMemory *m
   result_start(request, result);
   result->success = 1;
   result->largest_available = daze_dpmi_linear_memory_largest_available(memory);
+}
+
+void daze_dpmi_free_memory_information_encode(
+  uint32_t largest_available, uint8_t information[DAZE_DPMI_FREE_MEMORY_INFORMATION_SIZE]) {
+  memset(information, 0xff, DAZE_DPMI_FREE_MEMORY_INFORMATION_SIZE);
+  daze_write_u32(information, largest_available);
 }
 
 void daze_dpmi_request_get_version(const DazeDpmiRequest *request, DazeDpmiResult *result) {

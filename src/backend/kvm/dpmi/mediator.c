@@ -399,15 +399,14 @@ DazeKvmDpmiMediatorStatus daze_kvm_dpmi_mediator_process(DazeKvmDpmiMediator *me
   case DAZE_DPMI_GET_FREE_MEM: {
     const uint16_t es = daze_read_u16(record + REC_ES);
     const uint16_t di = daze_read_u16(record + REC_DI);
+    uint8_t information[DAZE_DPMI_FREE_MEMORY_INFORMATION_SIZE];
     uint32_t base;
     daze_dpmi_request_get_free_memory_information(mediator->linear_memory, &request, &result);
     if (!result.success || !descriptor_base(mediator, es, &base) || base > UINT32_MAX - di ||
-        !range_valid(mediator, base + di, 48)) {
+        !range_valid(mediator, base + di, sizeof(information))) {
       return DAZE_KVM_DPMI_MEDIATOR_INVALID;
     }
-    uint8_t information[48];
-    memset(information, 0xff, sizeof(information));
-    daze_write_u32(information, result.largest_available);
+    daze_dpmi_free_memory_information_encode(result.largest_available, information);
     memcpy(mediator->guest + base + di, information, sizeof(information));
     break;
   }
