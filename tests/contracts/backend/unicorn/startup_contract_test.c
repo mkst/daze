@@ -195,7 +195,10 @@ static int procedure_case(int interrupt, int kind) {
   set_reg32(uc, UC_X86_REG_EIP, kind == 8 ? 0x10000 : 0x100);
   set_reg16(uc, UC_X86_REG_AX, interrupt ? 0x0300 : 0x0301);
   set_reg16(uc, UC_X86_REG_BX, kind == 4 ? 0x0121 : 0x21);
-  set_reg16(uc, UC_X86_REG_CX, kind == 2 || (kind >= 16 && kind <= 18) ? 2 : 0);
+  const uint16_t parameter_words = kind == 22 || kind == 23                  ? 3
+                                   : kind == 2 || (kind >= 16 && kind <= 18) ? 2
+                                                                             : 0;
+  set_reg16(uc, UC_X86_REG_CX, parameter_words);
   set_reg32(uc, UC_X86_REG_EDI, kind == 3 ? UINT32_MAX : 0x200);
   uint8_t frame[k_dpmi_rm_frame_size] = {0};
   const uint8_t reserved[] = {0xde, 0xad, 0xbe, 0xef};
@@ -205,7 +208,7 @@ static int procedure_case(int interrupt, int kind) {
   daze_write_u16(frame + k_dpmi_rm_cs, kind == 5 ? 0 : 0x3000);
   daze_write_u16(frame + k_dpmi_rm_ip, 0x400);
   daze_write_u16(frame + k_dpmi_rm_flags, 0x203);
-  if (kind == 1 || kind == 2 || kind == 9) {
+  if (kind == 1 || kind == 2 || kind == 9 || kind == 22) {
     daze_write_u16(frame + k_dpmi_rm_ss, 0x4000);
     daze_write_u16(frame + k_dpmi_rm_sp, kind == 9 ? 3 : 0x800);
   }
@@ -214,7 +217,7 @@ static int procedure_case(int interrupt, int kind) {
     daze_write_u16(frame + k_dpmi_rm_ss, 0x4000);
     daze_write_u16(frame + k_dpmi_rm_sp, kind == 18 ? 0x1000 : 0x800);
   }
-  const uint16_t parameters[] = {0x1234, 0x5678};
+  const uint16_t parameters[] = {0x1234, 0x5678, 0x9abc};
   CHECK(uc_mem_write(uc, 0x20800, parameters, sizeof(parameters)) == UC_ERR_OK);
   CHECK(uc_mem_write(uc, 0x20200, frame, sizeof(frame)) == UC_ERR_OK);
   if (kind == 10) set_reg16(uc, UC_X86_REG_ES, 0);
@@ -243,7 +246,8 @@ static int procedure_case(int interrupt, int kind) {
     goto out;
   }
   CHECK(accepted);
-  const int success = (kind < 3 || kind == 13 || kind >= 19) && !(interrupt && kind == 2);
+  const int success =
+    (kind < 3 || kind == 13 || kind >= 19) && !(interrupt && parameter_words != 0);
   if (!success && !(interrupt && (kind == 6 || kind == 7 || kind == 8))) {
     CHECK(!context.run.rm_procedure_active && get_reg16(uc, UC_X86_REG_AX) == 0x8021);
     CHECK(get_reg32(uc, UC_X86_REG_EFLAGS) & 1u);
@@ -268,13 +272,14 @@ static int procedure_case(int interrupt, int kind) {
   CHECK(daze_read_u16(target) == 0x400 && daze_read_u16(target + 2) == 0x3000);
   uint32_t stack_address =
     kind == 13 ? 0x100 - (interrupt ? 6 : 4)
-    : kind == 1 || kind == 2
+    : kind == 1 || kind == 2 || kind == 22
       ? 0x40800 - (interrupt ? 6 : 4)
       : ((uint32_t)k_dpmi_return_stack_segment << 4) + k_dpmi_return_stack_sp - (interrupt ? 6 : 0);
   CHECK(uc_mem_read(uc, stack_address, stack, sizeof(stack)) == UC_ERR_OK);
   CHECK(daze_read_u16(stack) == 0 && daze_read_u16(stack + 2) == k_dpmi_rm_gate_segment);
   if (interrupt) CHECK(daze_read_u16(stack + 4) == 0x203);
-  if (!interrupt && kind == 2) CHECK(memcmp(stack + 4, parameters, sizeof(parameters)) == 0);
+  if (!interrupt && parameter_words != 0)
+    CHECK(memcmp(stack + 4, parameters, parameter_words * 2u) == 0);
   uint8_t expected[sizeof(frame)];
   memcpy(expected, frame, sizeof(expected));
   const uint8_t returned[] = {
@@ -507,7 +512,7 @@ int main(void) {
   for (int kind = 0; kind <= 18; ++kind)
     pass &= exec_case(kind);
   for (int interrupt = 0; interrupt < 2; ++interrupt)
-    for (int kind = 0; kind <= 21; ++kind)
+    for (int kind = 0; kind <= 23; ++kind)
       pass &= procedure_case(interrupt, kind);
   for (int kind = 0; kind < 8; ++kind)
     pass &= raw_vectors_case(kind);

@@ -586,17 +586,17 @@ DazeKvmDpmiMediatorStatus daze_kvm_dpmi_mediator_process(DazeKvmDpmiMediator *me
       supplied_ss == 0 && supplied_sp == 0 ? RM_RETURN_STACK_SEGMENT : supplied_ss;
     const uint16_t frame_sp =
       supplied_ss == 0 && supplied_sp == 0 ? RM_RETURN_STACK_SP : supplied_sp;
-    const uint32_t stack_address = ((uint32_t)frame_ss << 4) + frame_sp - 6;
-    if (frame_sp < 6 || stack_address > mediator->guest_size - 6) {
+    DazeDpmiRmStack stack;
+    if (!daze_dpmi_rm_stack_plan(frame_ss, frame_sp, 6, 0, mediator->guest_size, &stack)) {
       return DAZE_KVM_DPMI_MEDIATOR_INVALID;
     }
     mediator->rm_procedure = (DazeDpmiRmProcedure){.target_cs = 0x0300,
                                                    .target_ip = 0,
                                                    .frame_ss = frame_ss,
                                                    .frame_sp = frame_sp,
-                                                   .procedure_sp = (uint16_t)(frame_sp - 6),
+                                                   .procedure_sp = stack.sp,
                                                    .frame_address = es_base + di,
-                                                   .stack_address = stack_address};
+                                                   .stack_address = stack.address};
     mediator->rm_procedure_present = 1;
     mediator->rm_procedure_is_interrupt = 1;
     result = (DazeDpmiResult){.success = 1, .ax = function};

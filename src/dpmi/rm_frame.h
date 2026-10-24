@@ -1,6 +1,7 @@
 #ifndef DAZE_DPMI_RM_FRAME_H
 #define DAZE_DPMI_RM_FRAME_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 enum {
@@ -26,6 +27,16 @@ enum {
   DAZE_DPMI_RM_RETURN_IP = 0x0000,
   DAZE_DPMI_RM_RETURN_CS = 0x0230,
 };
+
+/* Resolve host-stack defaults before planning a real-mode SS:SP. Return frames
+ * use four bytes for RETF or six for IRET; copied parameters follow them. */
+typedef struct {
+  uint16_t sp;
+  uint32_t address;
+} DazeDpmiRmStack;
+
+int daze_dpmi_rm_stack_plan(uint16_t ss, uint16_t sp, uint16_t return_bytes,
+                            uint32_t parameter_bytes, size_t guest_size, DazeDpmiRmStack *stack);
 
 /* 0301h admits a 16-bit protected caller and a 50-byte frame at ES:(E)DI. The supported
  * two-word form accepts SS:SP=0:0 for the host return stack; parameters follow the

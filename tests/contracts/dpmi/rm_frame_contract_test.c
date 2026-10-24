@@ -5,7 +5,43 @@
 #include <stdio.h>
 #include <string.h>
 
+static int stack_plans(void) {
+  const struct {
+    uint16_t ss, sp, return_bytes;
+    uint32_t parameters;
+    size_t guest_size;
+    int accepted;
+    uint16_t planned_sp;
+    uint32_t address;
+  } cases[] = {
+    {0x200, 0x100, 4, 0, 0x2100, 1, 0xfc, 0x20fc},
+    {0x200, 0x100, 6, 0, 0x2100, 1, 0xfa, 0x20fa},
+    {0x200, 0x100, 4, 6, 0x2106, 1, 0xfc, 0x20fc},
+    {0x200, 0x100, 4, 6, 0x2105, 0, 0, 0},
+    {0x200, 3, 4, 0, 0x2100, 0, 0, 0},
+    {0x200, 5, 6, 0, 0x2100, 0, 0, 0},
+    {0, 4, 4, 0, 4, 1, 0, 0},
+    {0, 4, 4, 0, 0, 0, 0, 0},
+    {0xffff, 0xffff, 4, 4, 0x10fff3, 1, 0xfffb, 0x10ffeb},
+    {0x200, 0x100, 4, UINT32_MAX, UINT32_MAX, 0, 0, 0},
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+    DazeDpmiRmStack stack = {.sp = 0xabcd, .address = 0x12345678};
+    const int accepted = daze_dpmi_rm_stack_plan(cases[i].ss, cases[i].sp, cases[i].return_bytes,
+                                                 cases[i].parameters, cases[i].guest_size, &stack);
+    if (accepted != cases[i].accepted ||
+        (accepted && (stack.sp != cases[i].planned_sp || stack.address != cases[i].address)) ||
+        (!accepted && (stack.sp != 0xabcd || stack.address != 0x12345678))) {
+      fprintf(stderr, "RM stack case=%zu accepted=%d sp=%04x address=%08x\n", i, accepted, stack.sp,
+              stack.address);
+      return 0;
+    }
+  }
+  return !daze_dpmi_rm_stack_plan(0x200, 0x100, 4, 0, 0x4000, NULL);
+}
+
 int main(void) {
+  if (!stack_plans()) return 1;
   /* Frame built from the observed CC1PSX 2.7.2 0301h request: ES=0x10 with
    * base 0x1fe20, DI=0x0c74, target 1000:2189, stack 1fe2:feb0. */
   uint8_t frame[DAZE_DPMI_RM_FRAME_SIZE];
