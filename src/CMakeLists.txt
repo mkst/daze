@@ -235,6 +235,7 @@ add_library(daze_kvm_runner STATIC
   dos/file_time.c
   dos/country.c
   bios/timer.c
+  bios/probe_service.c
   bios/rtc.c
 )
 daze_configure_c11_pedantic_target(daze_kvm_runner PUBLIC)
@@ -364,6 +365,7 @@ add_executable(daze
   dos/country.c
   loader/image.c
   bios/timer.c
+  bios/probe_service.c
   bios/rtc.c
 )
 

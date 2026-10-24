@@ -42,18 +42,26 @@ static void probes(void) {
       for (int advanced = 0; advanced < 2; ++advanced) {
         context.engine.debug = debug;
         context.run = (DazeUnicornRunState){.interrupt_already_advanced = advanced};
-        set_reg16(uc, UC_X86_REG_AX, cases[i].ax);
-        set_reg16(uc, UC_X86_REG_BX, cases[i].bx);
-        set_reg16(uc, UC_X86_REG_CX, 0x1234);
-        set_reg16(uc, UC_X86_REG_DX, 0x5678);
+        set_reg32(uc, UC_X86_REG_EAX, 0x11220000u | cases[i].ax);
+        set_reg32(uc, UC_X86_REG_EBX, 0x33440000u | cases[i].bx);
+        set_reg32(uc, UC_X86_REG_ECX, 0x55661234);
+        set_reg32(uc, UC_X86_REG_EDX, 0x77885678);
+        set_reg32(uc, UC_X86_REG_ESI, 0x99aabbcc);
+        set_reg32(uc, UC_X86_REG_EDI, 0xddeeff00);
         set_reg16(uc, UC_X86_REG_IP, 0x100);
-        set_reg32(uc, UC_X86_REG_EFLAGS, 0x203);
+        set_reg32(uc, UC_X86_REG_EFLAGS, 0xad7);
         assert(daze_bios_dispatch(uc, cases[i].interrupt, &context.engine, &context.run));
         assert(get_reg16(uc, UC_X86_REG_AX) == cases[i].reply_ax);
         assert(get_reg16(uc, UC_X86_REG_BX) == cases[i].reply_bx);
         assert(get_reg16(uc, UC_X86_REG_CX) == cases[i].reply_cx);
         assert(get_reg16(uc, UC_X86_REG_DX) == cases[i].reply_dx);
-        assert((get_reg32(uc, UC_X86_REG_EFLAGS) & 1) == (unsigned)cases[i].carry);
+        assert(get_reg32(uc, UC_X86_REG_EAX) == (0x11220000u | cases[i].reply_ax));
+        assert(get_reg32(uc, UC_X86_REG_EBX) == (0x33440000u | cases[i].reply_bx));
+        assert(get_reg32(uc, UC_X86_REG_ECX) == (0x55660000u | cases[i].reply_cx));
+        assert(get_reg32(uc, UC_X86_REG_EDX) == (0x77880000u | cases[i].reply_dx));
+        assert(get_reg32(uc, UC_X86_REG_ESI) == 0x99aabbcc);
+        assert(get_reg32(uc, UC_X86_REG_EDI) == 0xddeeff00);
+        assert(get_reg32(uc, UC_X86_REG_EFLAGS) == (0xad6u | (unsigned)cases[i].carry));
         assert(get_reg16(uc, UC_X86_REG_IP) == (advanced ? 0x100 : 0x102));
       }
   fflush(stderr);
