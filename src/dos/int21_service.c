@@ -648,6 +648,7 @@ int daze_dos_int21_is_shared_function(uint8_t ah) {
   case DAZE_DOS_DISPLAY_STRING:
   case DAZE_DOS_KEYBOARD_STATUS:
   case DAZE_DOS_GET_DRIVE:
+  case DAZE_DOS_GET_SWITCH_CHAR:
   case DAZE_DOS_SET_DTA:
   case DAZE_DOS_PARSE_FILENAME:
   case DAZE_DOS_GET_DATE:
@@ -712,6 +713,14 @@ DazeDosInt21DispatchStatus daze_dos_int21_dispatch(const DazeDosInt21Context *co
   }
 
   switch ((uint8_t)(request->ax >> 8)) {
+  case DAZE_DOS_GET_SWITCH_CHAR:
+    if ((uint8_t)request->ax != 0) return DAZE_DOS_INT21_DISPATCH_OK;
+    result->disposition = DAZE_DOS_INT21_HANDLED;
+    result->register_write_mask = DAZE_DOS_INT21_REG_AX | DAZE_DOS_INT21_REG_DX;
+    result->ax = (uint16_t)(request->ax & 0xff00u);
+    result->dx = (uint16_t)((request->dx & 0xff00u) | '/');
+    set_flag(result, DAZE_DOS_INT21_FLAG_CF, 0);
+    return DAZE_DOS_INT21_DISPATCH_OK;
   case DAZE_DOS_GET_DATE: {
     DazeDosDate date;
     (void)daze_dos_date_get(&date);
