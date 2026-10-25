@@ -1102,10 +1102,10 @@ int main(void) {
   }
 
   request = (DazeDosInt21Request){.ax = 0x3700, .dx = 0xabcd, .flags = 0x0203};
-  pass &= expect_result("get switch character", daze_dos_int21_dispatch(&context, &request, &result),
-                        DAZE_DOS_INT21_DISPATCH_OK, &result, DAZE_DOS_INT21_HANDLED,
-                        DAZE_DOS_INT21_REG_AX | DAZE_DOS_INT21_REG_DX,
-                        DAZE_DOS_INT21_FLAG_CF, 0);
+  pass &=
+    expect_result("get switch character", daze_dos_int21_dispatch(&context, &request, &result),
+                  DAZE_DOS_INT21_DISPATCH_OK, &result, DAZE_DOS_INT21_HANDLED,
+                  DAZE_DOS_INT21_REG_AX | DAZE_DOS_INT21_REG_DX, DAZE_DOS_INT21_FLAG_CF, 0);
   pass &= result.ax == 0x3700 && result.dx == 0xab2f;
 
   request = (DazeDosInt21Request){.ax = 0x3701};
