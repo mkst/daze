@@ -114,8 +114,30 @@ static int hostile_linear_requests(void) {
   return failed_with(0x8023, &result);
 }
 
+static int free_memory_information_image(void) {
+  const struct {
+    uint32_t largest;
+    uint8_t prefix[4];
+  } cases[] = {
+    {0, {0, 0, 0, 0}},
+    {0x12345678, {0x78, 0x56, 0x34, 0x12}},
+    {UINT32_MAX, {0xff, 0xff, 0xff, 0xff}},
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+    uint8_t guarded[50];
+    memset(guarded, 0xa5, sizeof(guarded));
+    daze_dpmi_free_memory_information_encode(cases[i].largest, guarded + 1);
+    if (guarded[0] != 0xa5 || guarded[49] != 0xa5 ||
+        memcmp(guarded + 1, cases[i].prefix, sizeof(cases[i].prefix)) != 0)
+      return 0;
+    for (size_t byte = 5; byte < 49; ++byte)
+      if (guarded[byte] != 0xff) return 0;
+  }
+  return 1;
+}
+
 int main(void) {
-  int pass = hostile_descriptors() && hostile_linear_requests();
+  int pass = hostile_descriptors() && hostile_linear_requests() && free_memory_information_image();
 
   DazeDosMemory dos_memory;
   daze_dos_memory_init(&dos_memory, 0x3000, 0x3100);

@@ -334,6 +334,36 @@ static void observe_transfer(const DazeDosInt21Context *context, const DazeDosIn
   if (hook != NULL) hook(context->transfer_context, request, file);
 }
 
+static DazeDosInt21DispatchStatus dispatch_character_output(const DazeDosInt21Context *context,
+                                                            const DazeDosInt21Request *request,
+                                                            DazeDosInt21Result *result) {
+  if (context->files == NULL || context->files->handles == NULL)
+    return DAZE_DOS_INT21_DISPATCH_INVALID_ARGUMENT;
+  const uint8_t character = (uint8_t)request->dx;
+  const uint8_t function = (uint8_t)(request->ax >> 8);
+  int host_errno = 0;
+  const DazeDosfsStatus status =
+    daze_dosfs_file_write_character(context->files, character, &host_errno);
+  if (status != DAZE_DOSFS_OK) {
+    /* These character services have no guest CF/error-word reply. */
+    fprintf(stderr, "  DOS 21h/%02Xh cannot write standard output: %s\n", function,
+            status == DAZE_DOSFS_HOST_ERROR ? strerror(host_errno)
+                                            : "stdout handle is unavailable");
+    return DAZE_DOS_INT21_DISPATCH_IO_FAILURE;
+  }
+  const DazeDosfsFileResult file = {.success = 1, .byte_count = 1, .host_write_attempted = 1};
+  observe_transfer(context, request, &file, 0);
+  observe_transfer(context, request, &file, 1);
+  result->disposition = DAZE_DOS_INT21_HANDLED;
+  result->register_write_mask = DAZE_DOS_INT21_REG_AX;
+  result->ax = (uint16_t)((request->ax & 0xff00u) | character);
+  if (function == DAZE_DOS_CONSOLE_IO) {
+    set_flag(result, DAZE_DOS_INT21_FLAG_CF, 0);
+    set_flag(result, DAZE_DOS_INT21_FLAG_ZF, 0);
+  }
+  return DAZE_DOS_INT21_DISPATCH_OK;
+}
+
 static DazeDosInt21DispatchStatus dispatch_display_string(const DazeDosInt21Context *context,
                                                           const DazeDosInt21Request *request,
                                                           DazeDosInt21Result *result) {
@@ -613,6 +643,7 @@ static DazeDosInt21DispatchStatus dispatch_swappable_data_area(const DazeDosInt2
 
 int daze_dos_int21_is_shared_function(uint8_t ah) {
   switch (ah) {
+  case DAZE_DOS_DISPLAY_CHAR:
   case DAZE_DOS_CONSOLE_IO:
   case DAZE_DOS_DISPLAY_STRING:
   case DAZE_DOS_KEYBOARD_STATUS:
@@ -702,6 +733,8 @@ DazeDosInt21DispatchStatus daze_dos_int21_dispatch(const DazeDosInt21Context *co
     return DAZE_DOS_INT21_DISPATCH_OK;
   case DAZE_DOS_DISPLAY_STRING:
     return dispatch_display_string(context, request, result);
+  case DAZE_DOS_DISPLAY_CHAR:
+    return dispatch_character_output(context, request, result);
   case DAZE_DOS_GET_VERSION:
     result->disposition = DAZE_DOS_INT21_HANDLED;
     result->register_write_mask =
@@ -763,7 +796,7 @@ DazeDosInt21DispatchStatus daze_dos_int21_dispatch(const DazeDosInt21Context *co
     set_flag(result, DAZE_DOS_INT21_FLAG_CF, 0);
     return DAZE_DOS_INT21_DISPATCH_OK;
   case DAZE_DOS_CONSOLE_IO:
-    if ((uint8_t)request->dx != 0xff) return DAZE_DOS_INT21_DISPATCH_OK;
+    if ((uint8_t)request->dx != 0xff) return dispatch_character_output(context, request, result);
     result->disposition = DAZE_DOS_INT21_HANDLED;
     result->register_write_mask = DAZE_DOS_INT21_REG_AX;
     result->ax = (uint16_t)(request->ax & 0xff00u);

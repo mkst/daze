@@ -509,8 +509,6 @@ int daze_setup_start_dpmi_rm_procedure(uc_engine *uc, DazeUnicornEngine *engine,
   const uint16_t target_cs = daze_read_u16(frame + k_dpmi_rm_cs);
   const uint16_t target_ip = daze_read_u16(frame + k_dpmi_rm_ip);
   const uint32_t parameter_bytes = (uint32_t)cx * 2u;
-  uint16_t procedure_sp = frame_sp;
-  uint32_t stack_address = 0;
   if ((bx >> 8) != 0 || target_cs == 0 ||
       daze_dpmi_selector_code_width(uc, get_reg16(uc, UC_X86_REG_CS)) != 16) {
     fprintf(stderr, "  DPMI 31h/0301h unsupported BX=%04x CX=%04x\n", bx, cx);
@@ -519,29 +517,28 @@ int daze_setup_start_dpmi_rm_procedure(uc_engine *uc, DazeUnicornEngine *engine,
     skip_interrupt_instruction(uc, run);
     return 1;
   }
-  if (frame_ss == 0 && frame_sp == 0) {
-    procedure_sp = k_dpmi_return_stack_sp;
-    stack_address = ((uint32_t)k_dpmi_return_stack_segment << 4) + procedure_sp;
-  } else {
-    if (frame_sp < 4 ||
-        (uint32_t)frame_ss << 4 > (uint32_t)k_memory_size - (uint32_t)frame_sp - parameter_bytes) {
-      fprintf(stderr, "  DPMI 31h/0301h invalid real-mode stack %04x:%04x\n", frame_ss, frame_sp);
-      set_reg16(uc, UC_X86_REG_AX, 0x8021);
-      set_carry(uc, 1);
-      skip_interrupt_instruction(uc, run);
-      return 1;
-    }
-    procedure_sp = (uint16_t)(frame_sp - 4);
-    stack_address = ((uint32_t)frame_ss << 4) + procedure_sp;
+  const int host_stack = frame_ss == 0 && frame_sp == 0;
+  DazeDpmiRmStack stack;
+  /* The private 0301h stack constant names the return slot, not the caller's top. */
+  const int stack_valid = daze_dpmi_rm_stack_plan(
+    host_stack ? k_dpmi_return_stack_segment : frame_ss,
+    host_stack ? k_dpmi_return_stack_sp + 4 : frame_sp, 4, parameter_bytes, k_memory_size, &stack);
+  if (!host_stack && !stack_valid) {
+    fprintf(stderr, "  DPMI 31h/0301h invalid real-mode stack %04x:%04x\n", frame_ss, frame_sp);
+    set_reg16(uc, UC_X86_REG_AX, 0x8021);
+    set_carry(uc, 1);
+    skip_interrupt_instruction(uc, run);
+    return 1;
   }
-  if (((uint32_t)target_cs << 4) + target_ip >= k_memory_size ||
-      stack_address > k_memory_size - 4 - parameter_bytes) {
+  if (((uint32_t)target_cs << 4) + target_ip >= k_memory_size || !stack_valid) {
     fprintf(stderr, "  DPMI 31h/0301h target or stack outside guest memory\n");
     set_reg16(uc, UC_X86_REG_AX, 0x8021);
     set_carry(uc, 1);
     skip_interrupt_instruction(uc, run);
     return 1;
   }
+  const uint16_t procedure_sp = stack.sp;
+  const uint32_t stack_address = stack.address;
   daze_dpmi_capture_state(uc, &run->rm_procedure_pm_state);
   if (run->rm_procedure_pm_state.esp > UINT16_MAX || run->rm_procedure_pm_state.eip > UINT16_MAX) {
     fprintf(stderr, "  DPMI 31h/0301h requires a 16-bit protected continuation\n");
@@ -646,8 +643,6 @@ int daze_setup_start_dpmi_rm_interrupt(uc_engine *uc, DazeUnicornEngine *engine,
   const uint16_t target_ip = process->dos_process.dos_vector_offset[vector];
   const uint16_t frame_ss = daze_read_u16(frame + k_dpmi_rm_ss);
   const uint16_t frame_sp = daze_read_u16(frame + k_dpmi_rm_sp);
-  uint16_t interrupt_sp = frame_sp;
-  uint32_t stack_address = 0;
   const int code_width = daze_dpmi_selector_code_width(uc, get_reg16(uc, UC_X86_REG_CS));
   if (cx != 0 || (bx >> 8) != 0 || target_cs == 0 || (code_width != 16 && code_width != 32)) {
     fprintf(stderr, "  DPMI 31h/0300h unsupported BX=%04x CX=%04x\n", bx, cx);
@@ -656,28 +651,27 @@ int daze_setup_start_dpmi_rm_interrupt(uc_engine *uc, DazeUnicornEngine *engine,
     skip_interrupt_instruction(uc, run);
     return 1;
   }
-  if (frame_ss == 0 && frame_sp == 0) {
-    interrupt_sp = (uint16_t)(k_dpmi_return_stack_sp - 6);
-    stack_address = ((uint32_t)k_dpmi_return_stack_segment << 4) + interrupt_sp;
-  } else {
-    if (frame_sp < 6 || ((uint32_t)frame_ss << 4) > (uint32_t)k_memory_size - frame_sp) {
-      fprintf(stderr, "  DPMI 31h/0300h invalid real-mode stack %04x:%04x\n", frame_ss, frame_sp);
-      set_reg16(uc, UC_X86_REG_AX, 0x8021);
-      set_carry(uc, 1);
-      skip_interrupt_instruction(uc, run);
-      return 1;
-    }
-    interrupt_sp = (uint16_t)(frame_sp - 6);
-    stack_address = ((uint32_t)frame_ss << 4) + interrupt_sp;
+  const int host_stack = frame_ss == 0 && frame_sp == 0;
+  DazeDpmiRmStack stack;
+  const int stack_valid = daze_dpmi_rm_stack_plan(
+    host_stack ? k_dpmi_return_stack_segment : frame_ss,
+    host_stack ? k_dpmi_return_stack_sp : frame_sp, 6, 0, k_memory_size, &stack);
+  if (!host_stack && !stack_valid) {
+    fprintf(stderr, "  DPMI 31h/0300h invalid real-mode stack %04x:%04x\n", frame_ss, frame_sp);
+    set_reg16(uc, UC_X86_REG_AX, 0x8021);
+    set_carry(uc, 1);
+    skip_interrupt_instruction(uc, run);
+    return 1;
   }
-  if (((uint32_t)target_cs << 4) + target_ip >= k_memory_size ||
-      stack_address > k_memory_size - 6) {
+  if (((uint32_t)target_cs << 4) + target_ip >= k_memory_size || !stack_valid) {
     fprintf(stderr, "  DPMI 31h/0300h target or stack outside guest memory\n");
     set_reg16(uc, UC_X86_REG_AX, 0x8021);
     set_carry(uc, 1);
     skip_interrupt_instruction(uc, run);
     return 1;
   }
+  const uint16_t interrupt_sp = stack.sp;
+  const uint32_t stack_address = stack.address;
   daze_dpmi_capture_state(uc, &run->rm_procedure_pm_state);
   const uint8_t trampoline[] = {
     0xfa,                         /* cli */
@@ -752,18 +746,21 @@ int daze_setup_complete_dpmi_rm_procedure(uc_engine *uc, DazeUnicornEngine *engi
   if (uc_mem_read(uc, run->rm_procedure_frame_address, frame, sizeof(frame)) != UC_ERR_OK) {
     return 0;
   }
-  daze_write_u32(frame + k_dpmi_rm_edi, get_reg32(uc, UC_X86_REG_EDI));
-  daze_write_u32(frame + k_dpmi_rm_esi, get_reg32(uc, UC_X86_REG_ESI));
-  daze_write_u32(frame + k_dpmi_rm_ebp, get_reg32(uc, UC_X86_REG_EBP));
-  daze_write_u32(frame + k_dpmi_rm_ebx, get_reg32(uc, UC_X86_REG_EBX));
-  daze_write_u32(frame + k_dpmi_rm_edx, get_reg32(uc, UC_X86_REG_EDX));
-  daze_write_u32(frame + k_dpmi_rm_ecx, get_reg32(uc, UC_X86_REG_ECX));
-  daze_write_u32(frame + k_dpmi_rm_eax, get_reg32(uc, UC_X86_REG_EAX));
-  daze_write_u16(frame + k_dpmi_rm_flags, (uint16_t)get_reg32(uc, UC_X86_REG_EFLAGS));
-  daze_write_u16(frame + k_dpmi_rm_es, get_reg16(uc, UC_X86_REG_ES));
-  daze_write_u16(frame + k_dpmi_rm_ds, get_reg16(uc, UC_X86_REG_DS));
-  daze_write_u16(frame + k_dpmi_rm_fs, get_reg16(uc, UC_X86_REG_FS));
-  daze_write_u16(frame + k_dpmi_rm_gs, get_reg16(uc, UC_X86_REG_GS));
+  const DazeDpmiRmWriteBack image = {
+    .edi = get_reg32(uc, UC_X86_REG_EDI),
+    .esi = get_reg32(uc, UC_X86_REG_ESI),
+    .ebp = get_reg32(uc, UC_X86_REG_EBP),
+    .ebx = get_reg32(uc, UC_X86_REG_EBX),
+    .edx = get_reg32(uc, UC_X86_REG_EDX),
+    .ecx = get_reg32(uc, UC_X86_REG_ECX),
+    .eax = get_reg32(uc, UC_X86_REG_EAX),
+    .flags = (uint16_t)get_reg32(uc, UC_X86_REG_EFLAGS),
+    .es = get_reg16(uc, UC_X86_REG_ES),
+    .ds = get_reg16(uc, UC_X86_REG_DS),
+    .fs = get_reg16(uc, UC_X86_REG_FS),
+    .gs = get_reg16(uc, UC_X86_REG_GS),
+  };
+  daze_dpmi_rm_frame_write_back(frame, &image);
   const int reentry_ok =
     run->rm_procedure_32bit_reentry
       ? daze_setup_write_raw_pm_reentry32_wrapper(

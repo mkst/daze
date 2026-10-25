@@ -9,6 +9,7 @@ typedef struct {
   int carry;
 } DazeBiosTimerTick;
 
+/* Returns 0 only for a null output pointer. */
 int daze_bios_timer_ticks(DazeBiosTimerTick *reply);
 
 #endif

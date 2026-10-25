@@ -21,14 +21,6 @@
 #include "unicorn_context.h"
 #include "unicorn_services.h"
 
-static int write_dos_character(DazeMetrics *metrics, DazeDosfsFileService *files,
-                               uint8_t character) {
-  if (daze_dosfs_file_write_character(files, character, NULL) != DAZE_DOSFS_OK) return 0;
-  metrics->host_write_calls++;
-  metrics->host_write_bytes++;
-  return 1;
-}
-
 static DazeDosInt21Request capture_int21_request(uc_engine *uc) {
   uint32_t flags = 0;
   (void)uc_reg_read(uc, UC_X86_REG_EFLAGS, &flags);
@@ -100,12 +92,11 @@ static void int21_unicorn_transfer_observed(void *context, const DazeDosInt21Req
   DazeInt21UnicornPreReleaseContext *hook = context;
   if (hook == NULL || hook->engine == NULL || request == NULL || file == NULL) return;
   DazeMetrics *metrics = &hook->engine->metrics;
-  if ((uint8_t)(request->ax >> 8) == 0x3f && file->host_read_attempted) {
+  if (file->host_read_attempted) {
     metrics->host_read_calls++;
     metrics->host_read_bytes += file->byte_count;
   }
-  if (((uint8_t)(request->ax >> 8) == 0x40 || (uint8_t)(request->ax >> 8) == 0x09) &&
-      file->host_write_attempted) {
+  if (file->host_write_attempted) {
     metrics->host_write_calls++;
     metrics->host_write_bytes += file->byte_count;
   }
@@ -166,7 +157,8 @@ static int dispatch_shared_int21_reply(uc_engine *uc, DazeUnicornEngine *engine,
                      (result.flag_values & DAZE_DOS_INT21_FLAG_CF) != 0 ? "failed" : "ok");
     break;
   case 0x06:
-    daze_trace_debug(engine, "  DOS 21h/06h console poll: no character\n");
+    if ((uint8_t)request.dx == 0xff)
+      daze_trace_debug(engine, "  DOS 21h/06h console poll: no character\n");
     break;
   case 0x5d:
     daze_trace_debug(engine, "  DOS 21h/5D06h get swappable data area: %04x:%04x (2 bytes)\n",
@@ -279,28 +271,6 @@ int daze_unicorn_int21_dispatch(uc_engine *uc, DazeUnicornEngine *engine, DazeUn
     set_reg16(uc, UC_X86_REG_ES, segment);
     set_reg16(uc, UC_X86_REG_BX, offset);
     set_carry(uc, 0);
-    skip_interrupt_instruction(uc, run);
-    return 1;
-  }
-  case 0x06: {
-    const uint8_t character = (uint8_t)get_reg16(uc, UC_X86_REG_DX);
-    if (!write_dos_character(&engine->metrics, files, character)) {
-      fprintf(stderr, "  DOS 21h/06h cannot write standard output\n");
-      return 0;
-    }
-    set_reg16(uc, UC_X86_REG_AX, (uint16_t)((ax & 0xff00u) | character));
-    set_zero(uc, 0);
-    set_carry(uc, 0);
-    skip_interrupt_instruction(uc, run);
-    return 1;
-  }
-  case 0x02: {
-    const uint8_t character = (uint8_t)get_reg16(uc, UC_X86_REG_DX);
-    if (!write_dos_character(&engine->metrics, files, character)) {
-      fprintf(stderr, "  DOS 21h/02h cannot write standard output\n");
-      return 0;
-    }
-    set_reg16(uc, UC_X86_REG_AX, (uint16_t)((ax & 0xff00u) | character));
     skip_interrupt_instruction(uc, run);
     return 1;
   }

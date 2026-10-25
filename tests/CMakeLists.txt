@@ -40,6 +40,14 @@ add_executable(bios_timer_contract_test
 daze_configure_c11_pedantic_target(bios_timer_contract_test PRIVATE)
 add_test(NAME bios-timer-contract COMMAND bios_timer_contract_test)
 
+add_executable(bios_probe_service_contract_test
+  contracts/bios/probe_service_contract_test.c
+  ${CMAKE_SOURCE_DIR}/src/bios/probe_service.c
+  ${CMAKE_SOURCE_DIR}/src/bios/timer.c
+)
+daze_configure_c11_pedantic_target(bios_probe_service_contract_test PRIVATE)
+add_test(NAME bios-probe-service-contract COMMAND bios_probe_service_contract_test)
+
 add_executable(bios_rtc_contract_test
   contracts/bios/rtc_contract_test.c
   ${CMAKE_SOURCE_DIR}/src/bios/rtc.c
@@ -57,6 +65,11 @@ add_executable(int21_boundary_contract_test contracts/dos/int21_boundary_contrac
 daze_configure_c11_pedantic_target(int21_boundary_contract_test PRIVATE)
 target_link_libraries(int21_boundary_contract_test PRIVATE daze_dos_int21_service)
 daze_register_simple_contract_test(int21-boundary-contract int21_boundary_contract_test)
+
+add_executable(character_output_contract_test contracts/dos/character_output_contract_test.c)
+daze_configure_c11_pedantic_target(character_output_contract_test PRIVATE)
+target_link_libraries(character_output_contract_test PRIVATE daze_dos_int21_service)
+daze_register_simple_contract_test(character-output-contract character_output_contract_test)
 
 add_executable(dos_memory_contract_test contracts/dos/memory_contract_test.c)
 daze_configure_c11_pedantic_target(dos_memory_contract_test PRIVATE)
@@ -1005,6 +1018,7 @@ if(DAZE_HAS_UNICORN)
     ${CMAKE_SOURCE_DIR}/src/backend/unicorn/unicorn_registers.c
     ${CMAKE_SOURCE_DIR}/src/backend/unicorn/bios_adapter.c
     ${CMAKE_SOURCE_DIR}/src/bios/timer.c
+    ${CMAKE_SOURCE_DIR}/src/bios/probe_service.c
     ${CMAKE_SOURCE_DIR}/src/bios/rtc.c
   )
   daze_configure_c11_target(protected_dos_continuation_contract_test PRIVATE)
@@ -1049,6 +1063,7 @@ if(DAZE_HAS_UNICORN)
     ${CMAKE_SOURCE_DIR}/src/backend/unicorn/unicorn_registers.c
     ${CMAKE_SOURCE_DIR}/src/backend/unicorn/bios_adapter.c
     ${CMAKE_SOURCE_DIR}/src/bios/timer.c
+    ${CMAKE_SOURCE_DIR}/src/bios/probe_service.c
     ${CMAKE_SOURCE_DIR}/src/bios/rtc.c
   )
   daze_configure_c11_target(unicorn_dpmi_dispatch_contract_test PRIVATE)
@@ -1199,6 +1214,7 @@ if(DAZE_HAS_UNICORN)
     ${CMAKE_SOURCE_DIR}/src/backend/unicorn/unicorn_registers.c
     ${CMAKE_SOURCE_DIR}/src/backend/unicorn/bios_adapter.c
     ${CMAKE_SOURCE_DIR}/src/bios/timer.c
+    ${CMAKE_SOURCE_DIR}/src/bios/probe_service.c
     ${CMAKE_SOURCE_DIR}/src/bios/rtc.c
   )
   daze_configure_c11_target(unicorn_ldt_flush_scope_contract_test PRIVATE)
@@ -1240,6 +1256,7 @@ if(DAZE_HAS_UNICORN)
     ${CMAKE_SOURCE_DIR}/src/backend/unicorn/unicorn_registers.c
     ${CMAKE_SOURCE_DIR}/src/backend/unicorn/bios_adapter.c
     ${CMAKE_SOURCE_DIR}/src/bios/timer.c
+    ${CMAKE_SOURCE_DIR}/src/bios/probe_service.c
     ${CMAKE_SOURCE_DIR}/src/bios/rtc.c
   )
   daze_configure_c11_target(dpmi_shared_contract_test PRIVATE)
@@ -1280,6 +1297,7 @@ if(DAZE_HAS_UNICORN)
     ${CMAKE_SOURCE_DIR}/src/backend/unicorn/unicorn_registers.c
     ${CMAKE_SOURCE_DIR}/src/backend/unicorn/bios_adapter.c
     ${CMAKE_SOURCE_DIR}/src/bios/timer.c
+    ${CMAKE_SOURCE_DIR}/src/bios/probe_service.c
     ${CMAKE_SOURCE_DIR}/src/bios/rtc.c
   )
   daze_configure_c11_target(state_procedure_frame_contract_test PRIVATE)
@@ -1324,6 +1342,7 @@ if(DAZE_HAS_UNICORN)
     ${CMAKE_SOURCE_DIR}/src/backend/unicorn/unicorn_registers.c
     ${CMAKE_SOURCE_DIR}/src/backend/unicorn/bios_adapter.c
     ${CMAKE_SOURCE_DIR}/src/bios/timer.c
+    ${CMAKE_SOURCE_DIR}/src/bios/probe_service.c
     ${CMAKE_SOURCE_DIR}/src/bios/rtc.c
   )
   daze_configure_c11_target(exception_entry_transfer_contract_test PRIVATE)

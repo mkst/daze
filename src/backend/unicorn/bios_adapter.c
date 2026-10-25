@@ -1,10 +1,8 @@
 #include "bios_adapter.h"
-#include "timer.h"
+#include "probe_service.h"
 
 #include <stdarg.h>
 #include <stdio.h>
-
-#include "interrupt_vector.h"
 
 static void bios_debug(const DazeUnicornEngine *engine, const char *format, ...) {
   if (!engine->debug) return;
@@ -16,54 +14,34 @@ static void bios_debug(const DazeUnicornEngine *engine, const char *format, ...)
 
 int daze_bios_dispatch(uc_engine *uc, uint8_t interrupt, const DazeUnicornEngine *engine,
                        DazeUnicornRunState *run) {
-  if (interrupt == DAZE_INT_BIOS_EQUIPMENT) {
-    /* Equipment-list probe: bits 4-5 identify 80x25 color text. Leave all
-     * peripheral bits clear; this is a compatibility identity, not hardware
-     * emulation. */
-    bios_debug(engine, "  BIOS 11h equipment word: 0020 (80-column color text)\n");
-    set_reg16(uc, UC_X86_REG_AX, 0x0020);
-    set_carry(uc, 0);
-    skip_interrupt_instruction(uc, run);
-    return 1;
-  }
-  if (interrupt == DAZE_INT_BIOS_VIDEO && (get_reg16(uc, UC_X86_REG_AX) >> 8) == 0x0f) {
-    /* Current video mode query. A fixed 80-column color text identity is
-     * enough for command-line tools which probe display capabilities; Daze
-     * still exposes no framebuffer or mode-setting surface. */
-    bios_debug(engine, "  BIOS 10h/0Fh video mode: 80-column color text\n");
-    set_reg16(uc, UC_X86_REG_AX, 0x5003); // AH=columns, AL=mode 3.
-    set_reg16(uc, UC_X86_REG_BX, (uint16_t)(get_reg16(uc, UC_X86_REG_BX) & 0x00ffu));
-    set_carry(uc, 0);
-    skip_interrupt_instruction(uc, run);
-    return 1;
-  }
-  if (interrupt == DAZE_INT_BIOS_VIDEO && get_reg16(uc, UC_X86_REG_AX) == 0x1200 &&
-      (get_reg16(uc, UC_X86_REG_BX) & 0x00ffu) == 0x10) {
-    /* EGA/VGA capability query, not a graphics operation. Report a minimal
-     * color EGA-compatible adapter with 256 KiB and nonzero configuration
-     * bits so probing DOS extenders select their non-CGA path. No VGA memory,
-     * modes, palette, or display device is emulated. */
-    bios_debug(engine, "  BIOS 10h/12h/10h EGA capability: color, 256 KiB\n");
-    set_reg16(uc, UC_X86_REG_BX, 0x0003);
-    set_reg16(uc, UC_X86_REG_CX, 0x0001);
-    set_carry(uc, 0);
+  DazeBiosProbeReply reply;
+  const DazeBiosProbeKind kind = daze_bios_probe_dispatch(interrupt, get_reg16(uc, UC_X86_REG_AX),
+                                                          get_reg16(uc, UC_X86_REG_BX), &reply);
+  if (kind != DAZE_BIOS_PROBE_UNSUPPORTED) {
+    if (kind == DAZE_BIOS_PROBE_EQUIPMENT) {
+      bios_debug(engine, "  BIOS 11h equipment word: 0020 (80-column color text)\n");
+    } else if (kind == DAZE_BIOS_PROBE_VIDEO_MODE) {
+      bios_debug(engine, "  BIOS 10h/0Fh video mode: 80-column color text\n");
+    } else if (kind == DAZE_BIOS_PROBE_EGA) {
+      bios_debug(engine, "  BIOS 10h/12h/10h EGA capability: color, 256 KiB\n");
+    } else {
+      bios_debug(engine, "  BIOS 1Ah/00h timer ticks: %04x%04x\n", reply.cx, reply.dx);
+    }
+    if ((reply.register_write_mask & DAZE_BIOS_PROBE_REG_AX) != 0)
+      set_reg16(uc, UC_X86_REG_AX, reply.ax);
+    if ((reply.register_write_mask & DAZE_BIOS_PROBE_REG_BX) != 0)
+      set_reg16(uc, UC_X86_REG_BX, reply.bx);
+    if ((reply.register_write_mask & DAZE_BIOS_PROBE_REG_CX) != 0)
+      set_reg16(uc, UC_X86_REG_CX, reply.cx);
+    if ((reply.register_write_mask & DAZE_BIOS_PROBE_REG_DX) != 0)
+      set_reg16(uc, UC_X86_REG_DX, reply.dx);
+    set_carry(uc, reply.carry);
     skip_interrupt_instruction(uc, run);
     return 1;
   }
   if (interrupt == 0x67 && (get_reg16(uc, UC_X86_REG_AX) >> 8) == 0xde) {
     bios_debug(engine, "  EMS probe (INT 67h/DEh): EMS not present\n");
     set_reg16(uc, UC_X86_REG_AX, 0x0100);
-    skip_interrupt_instruction(uc, run);
-    return 1;
-  }
-  if (interrupt == DAZE_INT_BIOS_TIME && (get_reg16(uc, UC_X86_REG_AX) >> 8) == 0x00) {
-    DazeBiosTimerTick reply;
-    if (!daze_bios_timer_ticks(&reply)) return 0;
-    bios_debug(engine, "  BIOS 1Ah/00h timer ticks: %04x%04x\n", reply.cx, reply.dx);
-    set_reg16(uc, UC_X86_REG_CX, reply.cx);
-    set_reg16(uc, UC_X86_REG_DX, reply.dx);
-    set_reg16(uc, UC_X86_REG_AX, reply.ax);
-    set_carry(uc, reply.carry);
     skip_interrupt_instruction(uc, run);
     return 1;
   }

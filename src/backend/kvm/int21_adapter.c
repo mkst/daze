@@ -134,7 +134,7 @@ static int dispatch_shared_int21_reply(DazeKvmMachine *machine, DazeDosfsFileSer
                                        DazeKvmPreflightBoundaryResult *accounting) {
   const DazeDosInt21Request request = int21_request_from_record(record);
   const uint8_t function = (uint8_t)(request.ax >> 8);
-  /* Vector and console replies stay adapter-local on both backends. */
+  /* Vector installation still owns backend-specific guest state. */
   if (!daze_dos_int21_is_shared_function(function)) return 0;
   DazeInt21KvmGuestMemory guest_memory = {.machine = machine};
   if (machine == NULL) return -1;
@@ -245,32 +245,6 @@ DazeKvmPreflightBoundaryDisposition daze_kvm_int21_dispatch(
     daze_write_u16(mailbox + 2, process_state->dos_vector_offset[vector]);
     daze_write_u16(mailbox + 12, process_state->dos_vector_segment[vector]);
     reply_carry(mailbox, 0);
-    return DAZE_KVM_PREFLIGHT_BOUNDARY_HANDLED;
-  }
-  case DAZE_DOS_DISPLAY_CHAR: {
-    int host_errno = 0;
-    const DazeDosfsStatus status = daze_dosfs_file_write_character(files, (uint8_t)dx, &host_errno);
-    if (status == DAZE_DOSFS_OK) {
-      reply_carry(mailbox, 0);
-    } else {
-      daze_write_u16(
-        mailbox, status == DAZE_DOSFS_HOST_ERROR ? daze_dosfs_errno_to_dos_error(host_errno) : 6);
-      reply_carry(mailbox, 1);
-    }
-    return DAZE_KVM_PREFLIGHT_BOUNDARY_HANDLED;
-  }
-  case DAZE_DOS_CONSOLE_IO: {
-    const uint8_t character = (uint8_t)dx;
-    int host_errno = 0;
-    const DazeDosfsStatus status = daze_dosfs_file_write_character(files, character, &host_errno);
-    if (status == DAZE_DOSFS_OK) {
-      daze_write_u16(mailbox, (uint16_t)((ax & 0xff00u) | character));
-      reply_carry(mailbox, 0);
-    } else {
-      daze_write_u16(
-        mailbox, status == DAZE_DOSFS_HOST_ERROR ? daze_dosfs_errno_to_dos_error(host_errno) : 6);
-      reply_carry(mailbox, 1);
-    }
     return DAZE_KVM_PREFLIGHT_BOUNDARY_HANDLED;
   }
   case DAZE_DOS_FILE_ATTR:

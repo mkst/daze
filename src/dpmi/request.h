@@ -208,6 +208,13 @@ void daze_dpmi_request_get_free_memory_information(const DazeDpmiLinearMemory *m
                                                    const DazeDpmiRequest *request,
                                                    DazeDpmiResult *result);
 
+enum { DAZE_DPMI_FREE_MEMORY_INFORMATION_SIZE = 48 };
+
+/* 0500h's little-endian payload leaves unspecified fields at FFFFFFFFh.
+ * The caller supplies a writable buffer of the fixed size. */
+void daze_dpmi_free_memory_information_encode(
+  uint32_t largest_available, uint8_t information[DAZE_DPMI_FREE_MEMORY_INFORMATION_SIZE]);
+
 void daze_dpmi_request_get_version(const DazeDpmiRequest *request, DazeDpmiResult *result);
 
 /* 0600h/0601h succeed without side effects in the non-paging memory model. */

@@ -5,6 +5,15 @@
 #include <limits.h>
 #include <string.h>
 
+int daze_dpmi_rm_stack_plan(uint16_t ss, uint16_t sp, uint16_t return_bytes,
+                            uint32_t parameter_bytes, size_t guest_size, DazeDpmiRmStack *stack) {
+  if (stack == NULL || sp < return_bytes) return 0;
+  const uint32_t top = ((uint32_t)ss << 4) + sp;
+  if (top > guest_size || parameter_bytes > guest_size - top) return 0;
+  *stack = (DazeDpmiRmStack){.sp = (uint16_t)(sp - return_bytes), .address = top - return_bytes};
+  return 1;
+}
+
 int daze_dpmi_rm_frame_parse(const uint8_t frame[DAZE_DPMI_RM_FRAME_SIZE], uint32_t es_base,
                              uint32_t offset, uint16_t cx, uint16_t bx, int code_is_32bit,
                              DazeDpmiRmProcedure *output) {
@@ -21,17 +30,19 @@ int daze_dpmi_rm_frame_parse(const uint8_t frame[DAZE_DPMI_RM_FRAME_SIZE], uint3
     frame_ss = 0x0040;
     frame_sp = 0x0be4;
   }
-  if (frame_ss == 0 || frame_sp < 4) return 0;
-  const uint32_t stack_top = ((uint32_t)frame_ss << 4) + frame_sp;
-  if (stack_top < 4 || stack_top > UINT32_MAX) return 0;
+  DazeDpmiRmStack stack;
+  /* Guest-span and reserved-range checks belong to the real-mode runner. */
+  if (frame_ss == 0 ||
+      !daze_dpmi_rm_stack_plan(frame_ss, frame_sp, 4, (uint32_t)cx * 2u, UINT32_MAX, &stack))
+    return 0;
   *output = (DazeDpmiRmProcedure){
     .target_cs = daze_read_u16(frame + DAZE_DPMI_RM_CS),
     .target_ip = daze_read_u16(frame + DAZE_DPMI_RM_IP),
     .frame_ss = frame_ss,
     .frame_sp = frame_sp,
-    .procedure_sp = (uint16_t)(frame_sp - 4),
+    .procedure_sp = stack.sp,
     .frame_address = es_base + offset,
-    .stack_address = stack_top - 4,
+    .stack_address = stack.address,
     .parameter_bytes = (uint16_t)(cx * 2u),
   };
   return 1;

@@ -625,18 +625,18 @@ int daze_int31_dispatch(uc_engine *uc, DazeUnicornEngine *engine, DazeUnicornRun
   if (ax == DAZE_DPMI_GET_FREE_MEM) {
     const uint16_t es = get_reg16(uc, UC_X86_REG_ES);
     const uint16_t di = get_reg16(uc, UC_X86_REG_DI);
-    uint8_t information[48];
-    memset(information, 0xff, sizeof(information));
-    const uint32_t largest =
-      daze_dpmi_linear_memory_largest_available(&process->dpmi.linear_memory);
-    memcpy(information, &largest, sizeof(largest));
+    const DazeDpmiRequest request = {.function = ax};
+    DazeDpmiResult result;
+    daze_dpmi_request_get_free_memory_information(&process->dpmi.linear_memory, &request, &result);
+    uint8_t information[DAZE_DPMI_FREE_MEMORY_INFORMATION_SIZE];
+    daze_dpmi_free_memory_information_encode(result.largest_available, information);
     if (!daze_write_guest_bytes(uc, es, di, information, sizeof(information))) {
       fprintf(stderr, "  DPMI 31h/0500h invalid buffer %04x:%04x\n", es, di);
       set_reg16(uc, UC_X86_REG_AX, DAZE_DPMI_ERR_INVALID_SELECTOR);
       set_carry(uc, 1);
     } else {
       daze_trace_debug(engine, "  DPMI 31h/0500h free memory: largest %08" PRIx32 " bytes\n",
-                       largest);
+                       result.largest_available);
       set_carry(uc, 0);
     }
     skip_interrupt_instruction(uc, run);

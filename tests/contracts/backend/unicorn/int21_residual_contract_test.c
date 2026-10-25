@@ -37,6 +37,8 @@ int main(void) {
   call(uc, &context, &files, 0x0200, 0, 'A', 0x0241, 1);
   call(uc, &context, &files, 0x0600, 0, 'B', 0x0642, 0);
   assert(!(get_reg32(uc, UC_X86_REG_EFLAGS) & 0x40));
+  assert(context.engine.metrics.host_write_calls == 2 &&
+         context.engine.metrics.host_write_bytes == 2);
   rewind(output);
   assert(fgetc(output) == 'A' && fgetc(output) == 'B' && fgetc(output) == EOF);
   for (int function = 2; function <= 6; function += 4) {
@@ -50,6 +52,7 @@ int main(void) {
   }
   call(uc, &context, &files, 0x0600, 0, 0xff, 0x0600, 0);
   assert(get_reg32(uc, UC_X86_REG_EFLAGS) & 0x40);
+  assert(context.engine.metrics.host_write_calls == 2);
   call(uc, &context, &files, 0x0b00, 0, 0, 0x0b00, 0);
   call(uc, &context, &files, 0x5d06, 0, 0, 0x5d06, 0);
   assert(get_reg16(uc, UC_X86_REG_DS) == k_dos_int21_vector_segment);
@@ -73,10 +76,23 @@ int main(void) {
   }
   assert(int21_unicorn_pre_release(&hook, 0x3000));
   DazeDosInt21Request request = {.ax = 0x3f00, .bx = 5, .cx = 8, .ds = 0x1000, .dx = 0x200};
-  DazeDosfsFileResult file = {.byte_count = 4, .host_read_attempted = 1, .host_write_attempted = 1};
+  DazeDosfsFileResult file = {.byte_count = 4, .host_read_attempted = 1};
   uint64_t reads = context.engine.metrics.host_read_calls;
+  uint64_t writes = context.engine.metrics.host_write_calls;
   int21_unicorn_transfer_observed(&hook, &request, &file);
-  assert(context.engine.metrics.host_read_calls == reads + 1);
+  assert(context.engine.metrics.host_read_calls == reads + 1 &&
+         context.engine.metrics.host_write_calls == writes);
+  request.ax = 0x4000;
+  file.host_read_attempted = 0;
+  file.host_write_attempted = 1;
+  int21_unicorn_transfer_observed(&hook, &request, &file);
+  assert(context.engine.metrics.host_read_calls == reads + 1 &&
+         context.engine.metrics.host_write_calls == writes + 1);
+  file.host_write_attempted = 0;
+  int21_unicorn_transfer_observed(&hook, &request, &file);
+  assert(context.engine.metrics.host_read_calls == reads + 1 &&
+         context.engine.metrics.host_write_calls == writes + 1);
+  request.ax = 0x3f00;
   for (int absent = 0; absent < 4; ++absent) {
     DazeInt21UnicornPreReleaseContext invalid = hook;
     if (absent == 1) invalid.engine = NULL;
