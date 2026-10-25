@@ -5,8 +5,10 @@
 #undef NDEBUG
 #endif
 #include <assert.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
 
 typedef struct {
@@ -31,10 +33,22 @@ static void completed(void *opaque, const DazeDosInt21Request *request,
 }
 
 static void failed(const DazeDosInt21Context *context, uint16_t ax,
-                   DazeDosInt21DispatchStatus status) {
+                   DazeDosInt21DispatchStatus status, const char *diagnostic) {
   const DazeDosInt21Request request = {.ax = ax, .dx = 'X', .flags = 0x243};
   DazeDosInt21Result result;
-  assert(daze_dos_int21_dispatch(context, &request, &result) == status);
+  FILE *errors = tmpfile();
+  assert(errors != NULL);
+  const int saved = dup(STDERR_FILENO);
+  assert(saved >= 0 && dup2(fileno(errors), STDERR_FILENO) >= 0);
+  const DazeDosInt21DispatchStatus actual = daze_dos_int21_dispatch(context, &request, &result);
+  assert(fflush(stderr) == 0 && dup2(saved, STDERR_FILENO) >= 0);
+  assert(close(saved) == 0);
+  rewind(errors);
+  char text[256] = {0};
+  const size_t count = fread(text, 1, sizeof(text) - 1, errors);
+  assert(fclose(errors) == 0);
+  assert(diagnostic == NULL ? count == 0 : strstr(text, diagnostic) != NULL);
+  assert(actual == status);
   assert(result.disposition == DAZE_DOS_INT21_UNSUPPORTED);
   assert(result.register_write_mask == 0 && result.flag_write_mask == 0);
 }
@@ -86,12 +100,13 @@ int main(void) {
 
   assert(daze_dosfs_handles_close(&handles, 1, NULL) == DAZE_DOSFS_OK);
   for (unsigned function = 2; function <= 6; function += 4) {
-    failed(&context, function << 8, DAZE_DOS_INT21_DISPATCH_IO_FAILURE);
+    failed(&context, function << 8, DAZE_DOS_INT21_DISPATCH_IO_FAILURE,
+           "stdout handle is unavailable");
     DazeDosInt21Context missing = context;
     missing.files = NULL;
-    failed(&missing, function << 8, DAZE_DOS_INT21_DISPATCH_INVALID_ARGUMENT);
+    failed(&missing, function << 8, DAZE_DOS_INT21_DISPATCH_INVALID_ARGUMENT, NULL);
     files.handles = NULL;
-    failed(&context, function << 8, DAZE_DOS_INT21_DISPATCH_INVALID_ARGUMENT);
+    failed(&context, function << 8, DAZE_DOS_INT21_DISPATCH_INVALID_ARGUMENT, NULL);
     files.handles = &handles;
   }
   /* Polling never needs an output handle. */
@@ -103,8 +118,8 @@ int main(void) {
   assert(daze_dosfs_handles_bind_standard(&handles, STDIN_FILENO, readonly, STDERR_FILENO, NULL) ==
          DAZE_DOSFS_OK);
   assert(close(readonly) == 0);
-  failed(&context, 0x0200, DAZE_DOS_INT21_DISPATCH_IO_FAILURE);
-  failed(&context, 0x0600, DAZE_DOS_INT21_DISPATCH_IO_FAILURE);
+  failed(&context, 0x0200, DAZE_DOS_INT21_DISPATCH_IO_FAILURE, strerror(EBADF));
+  failed(&context, 0x0600, DAZE_DOS_INT21_DISPATCH_IO_FAILURE, strerror(EBADF));
   assert(transfers.observed == 24 && transfers.completed == 24);
   daze_dosfs_handles_close_all(&handles);
   assert(fclose(output) == 0);

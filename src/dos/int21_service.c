@@ -342,10 +342,13 @@ static DazeDosInt21DispatchStatus dispatch_character_output(const DazeDosInt21Co
   const uint8_t character = (uint8_t)request->dx;
   const uint8_t function = (uint8_t)(request->ax >> 8);
   int host_errno = 0;
-  if (daze_dosfs_file_write_character(context->files, character, &host_errno) != DAZE_DOSFS_OK) {
+  const DazeDosfsStatus status =
+    daze_dosfs_file_write_character(context->files, character, &host_errno);
+  if (status != DAZE_DOSFS_OK) {
     /* These character services have no guest CF/error-word reply. */
-    fprintf(stderr, "  DOS 21h/%02Xh cannot write standard output (host error %d)\n", function,
-            host_errno);
+    fprintf(stderr, "  DOS 21h/%02Xh cannot write standard output: %s\n", function,
+            status == DAZE_DOSFS_HOST_ERROR ? strerror(host_errno)
+                                            : "stdout handle is unavailable");
     return DAZE_DOS_INT21_DISPATCH_IO_FAILURE;
   }
   const DazeDosfsFileResult file = {.success = 1, .byte_count = 1, .host_write_attempted = 1};

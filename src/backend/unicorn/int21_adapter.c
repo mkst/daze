@@ -92,13 +92,11 @@ static void int21_unicorn_transfer_observed(void *context, const DazeDosInt21Req
   DazeInt21UnicornPreReleaseContext *hook = context;
   if (hook == NULL || hook->engine == NULL || request == NULL || file == NULL) return;
   DazeMetrics *metrics = &hook->engine->metrics;
-  if ((uint8_t)(request->ax >> 8) == 0x3f && file->host_read_attempted) {
+  if (file->host_read_attempted) {
     metrics->host_read_calls++;
     metrics->host_read_bytes += file->byte_count;
   }
-  if (((uint8_t)(request->ax >> 8) == 0x40 || (uint8_t)(request->ax >> 8) == 0x09 ||
-       (uint8_t)(request->ax >> 8) == 0x02 || (uint8_t)(request->ax >> 8) == 0x06) &&
-      file->host_write_attempted) {
+  if (file->host_write_attempted) {
     metrics->host_write_calls++;
     metrics->host_write_bytes += file->byte_count;
   }

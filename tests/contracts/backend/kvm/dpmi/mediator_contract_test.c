@@ -296,13 +296,19 @@ static int procedure_admission(DazeKvmDpmiMediatorTestFixture *fixture) {
   DazeKvmDpmiMediator *m = &fixture->mediator;
   uint8_t *guest = m->guest;
   const DazeKvmDpmiMediator original = *m;
+  const uint8_t code_flags = guest[m->gdt_address + 14];
+  int pass = 1;
   const DazeDpmiRequest request = {
     .function = 0x0301, .vector_segment = 0x10, .vector_offset = 0x2800};
   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
     *m = original;
     uint16_t port;
     uint8_t marker;
-    if (!daze_kvm_dpmi_mediator_test_begin(fixture, &request, &port, &marker)) return 0;
+    if (!daze_kvm_dpmi_mediator_test_begin(fixture, &request, &port, &marker)) {
+      fprintf(stderr, "0301h admission could not capture request for case=%zu\n", i);
+      pass = 0;
+      break;
+    }
     guest[m->gdt_address + 14] &= ~0x40u;
     daze_write_u16(guest + m->record_address + 8, cases[i].words);
     uint8_t *frame = guest + 0x2800;
@@ -319,18 +325,21 @@ static int procedure_admission(DazeKvmDpmiMediatorTestFixture *fixture) {
         (!accepted && memcmp(guest, before, sizeof(before)) != 0)) {
       fprintf(stderr, "0301h admission words=%u ss:sp=%04x:%04x status=%d\n", cases[i].words,
               cases[i].ss, cases[i].sp, status);
-      return 0;
+      pass = 0;
+      break;
     }
     if (accepted && (m->rm_procedure.parameter_bytes != cases[i].words * 2u ||
                      m->rm_procedure.stack_address != (cases[i].ss == 0 ? 0xfe0u : 0x20fcu))) {
       fprintf(stderr, "0301h admission stack=%x parameters=%u\n", m->rm_procedure.stack_address,
               m->rm_procedure.parameter_bytes);
-      return 0;
+      pass = 0;
+      break;
     }
-    guest[m->gdt_address + 14] |= 0x40u;
+    guest[m->gdt_address + 14] = code_flags;
   }
+  guest[original.gdt_address + 14] = code_flags;
   *m = original;
-  return 1;
+  return pass;
 }
 
 static int rejected_records(DazeKvmDpmiMediatorTestFixture *fixture) {
